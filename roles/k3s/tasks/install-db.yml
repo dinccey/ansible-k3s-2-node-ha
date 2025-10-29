@@ -48,17 +48,18 @@
 
 - name: Create K3s PostgreSQL user
   community.postgresql.postgresql_user:
-    login_db: "{{ k3s_psql_db }}"  # Changed from 'db'
+    login_db: "{{ k3s_psql_db }}"  # Database for connection/grants
     name: "{{ k3s_psql_user }}"
     password: "{{ k3s_psql_password }}"
+    priv: ALL  # Use 'priv' (supported now; deprecates to 'privileges' in v4.0.0)
     state: present
   become: true
   become_user: postgres
   vars:
-    ansible_postgresql_user: "{{ postgresql_user | default('postgres') }}"  # Optional: Superuser for grants
-  no_log: false 
+    ansible_postgresql_user: "{{ postgresql_user | default('postgres') }}"  # Optional: Superuser alias
+  no_log: true  # Hides password (was false—insecure)
   when:
-    - psql_master == True
+    - psql_master == True  # Only on primary
 
 - name: Grant public schema privileges to {{ k3s_psql_user }} in {{ k3s_psql_db }} DB
   community.postgresql.postgresql_query:
