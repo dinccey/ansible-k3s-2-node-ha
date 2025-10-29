@@ -24,14 +24,14 @@ It may be argued though that for many edge use cases the advantage of achieving 
 
 ### Installation
 
-Note: This playbook was only tested on VMs with Debian 13 running on Proxmox VE. It will not work in most public cloud environments that don't support VRRP and Gratuitous ARP in their network.
+Note: This playbook was only tested on VMs with Debian 13 running on Proxmox VE 9. It will not work in most public cloud environments that don't support VRRP and Gratuitous ARP in their network.
 
 #### Prerequisites
 
 1. Prepare two VMs or physical machines satisfying the k3s hardware requirements.
-2. Provision your SSH key to the machines such that it is authorized for the `ubuntu` user
+2. Provision your SSH key to the machines such that it is authorized for the `user` user
 3. Install Ansible on your local machine.
-4. On the nodes, install python3-psyopc2
+4. On the nodes, install python3-psyopc2 if an error comes up
 
 #### Deployment
 
