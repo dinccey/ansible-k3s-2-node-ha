@@ -2,3 +2,25 @@
   package: name="postgresql-{{ pg_version }}" state=present
   notify:
     - restart postgresql
+
+- name: Install Dependencies (debian/ubuntu)
+  apt: 
+    name: "python3-psycopg2"
+    state: latest
+  when: 
+    - ansible_os_family == "Debian"
+
+- name: Install Dependencies (debian/ubuntu)
+  apt: 
+    name: "acl"
+    state: latest
+  when: 
+    - ansible_os_family == "Debian"
+
+- name: Install Dependencies (debian/ubuntu)
+  apt: 
+    name: "net-tools"
+    state: latest
+  when: 
+    - ansible_os_family == "Debian"
+ 

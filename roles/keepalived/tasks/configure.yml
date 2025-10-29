@@ -24,6 +24,30 @@
     - check_primary_running.sh
     - notify.sh
 
+- name: Create keepalived_script system user
+  user:
+    name: keepalived_script
+    system: yes
+    shell: /bin/bash
+    create_home: no
+    state: present
+  become: true
+
+- name: Ensure notify scripts are owned by keepalived_script (adjust paths as needed)
+  file:
+    path: /etc/keepalived/notify.sh
+    owner: keepalived_script
+    group: keepalived_script  # Optional: Creates group if missing; or use 'root' if no group ref
+    mode: '0755'
+  become: true
+
+- name: Restart Keepalived to use the new user
+  systemd:
+    name: keepalived
+    state: restarted
+    enabled: true
+  become: true
+
 - name: install keepalived config
   template:
     src: "keepalived.conf.j2"

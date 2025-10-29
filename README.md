@@ -31,6 +31,7 @@ Note: This playbook was only tested on VMs with Ubuntu 18.04 running on vSphere.
 1. Prepare two VMs or physical machines satisfying the k3s hardware requirements.
 2. Provision your SSH key to the machines such that it is authorized for the `ubuntu` user
 3. Install Ansible on your local machine.
+4. On the nodes, install python3-psyopc2
 
 #### Deployment
 

@@ -1,26 +1,43 @@
+- name: Ensure PostgreSQL service is running
+  systemd:
+    name: postgresql@{{ pg_version }}-main
+    state: started
+    enabled: true
+  become: true
+
 - block:
-  - name: create repmgr db user
-    command: createuser -s repmgr
+  - name: Create repmgr DB user (superuser)
+    postgresql_user:
+      name: repmgr
+      password: "{{ repmgr_db_user_pass }}"
+      role_attr_flags: SUPERUSER,CREATEDB
+      state: present
     become: true
     become_user: postgres
+    vars:
+      ansible_postgresql_user: "{{ postgresql_user }}"  # Adjust if using a specific PG user module var
 
-  - name: change repmgr password
-    command: psql -c "alter user repmgr with password '{{ repmgr_db_user_pass }}';"
+  - name: Create repmgr database
+    postgresql_db:
+      name: repmgr
+      owner: repmgr
+      state: present
     become: true
     become_user: postgres
+    vars:
+      ansible_postgresql_user: "{{ postgresql_user }}"
 
-  - name: create repmgr role
-    command: createdb repmgr -O repmgr
-    become: true
-    become_user: postgres
+- name: Alter repmgr user search_path
+  postgresql_query:
+    login_db: repmgr  # Changed: Use login_db for target database
+    query: "ALTER USER repmgr SET search_path TO repmgr, \"$user\", public;"
+  become: true
+  become_user: postgres
+  vars:
+    ansible_postgresql_user: "{{ postgresql_user }}"  # Optional: Connection user alias (defaults to postgres)
+  ignore_errors: yes  # Keeps it non-blocking
 
-  - name: alter repmgr db user
-    command: psql -c 'alter user repmgr set search_path TO repmgr, "$user", public;'
-    become: true
-    become_user: postgres
-  ignore_errors: yes
-
-- name: register master
+- name: Register repmgr primary
   command: repmgr -f {{ repmgrd_config }} primary register --force
   register: repmgr_log
   become: true
