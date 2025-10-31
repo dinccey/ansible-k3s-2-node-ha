@@ -1,0 +1,91 @@
+---
+- name: Ensure apt dependencies for Helm are installed (Debian/Ubuntu)
+  apt:
+    name:
+      - curl
+      - gpg
+      - apt-transport-https
+    state: present
+    update_cache: true
+  when: ansible_os_family == 'Debian'
+
+- name: Fetch Helm GPG key and dearmor it
+  shell: |
+    set -o pipefail
+    curl -fsSL {{ helm_repo_key_url }} | gpg --dearmor > {{ helm_gpg_path }}
+  args:
+    creates: "{{ helm_gpg_path }}"
+  become: true
+
+- name: Add Helm apt repository list file
+  copy:
+    dest: "{{ helm_repo_list_file }}"
+    content: |
+      deb [signed-by={{ helm_gpg_path }}] https://packages.buildkite.com/helm-linux/helm-debian/any/ any main
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+
+- name: Update apt cache
+  apt:
+    update_cache: true
+  when: ansible_os_family == 'Debian'
+
+- name: Install Helm package
+  apt:
+    name: "{{ helm_package }}"
+    state: present
+  when: ansible_os_family == 'Debian'
+
+- name: Ensure kube config directory exists for kube user
+  file:
+    path: "/home/{{ kube_user }}/.kube"
+    state: directory
+    owner: "{{ kube_user }}"
+    group: "{{ kube_user }}"
+    mode: '0700'
+  become: true
+
+- name: Copy k3s kubeconfig into user's kube config
+  copy:
+    src: /etc/rancher/k3s/k3s.yaml
+    dest: "/home/{{ kube_user }}/.kube/config"
+    remote_src: yes
+    owner: "{{ kube_user }}"
+    group: "{{ kube_user }}"
+    mode: '0600'
+  become: true
+  when: ansible_facts['os_family'] == 'Debian' or ansible_facts['os_family'] == 'RedHat'
+
+- name: Ensure KUBECONFIG export is present in user's .bashrc
+  lineinfile:
+    path: "/home/{{ kube_user }}/.bashrc"
+    line: "export KUBECONFIG=~/.kube/config"
+    create: true
+    state: present
+  become: true
+  become_user: "{{ kube_user }}"
+
+- name: Create cert-manager namespace manifest (if missing) and apply
+  shell: |
+    kubectl create namespace cert-manager --dry-run=client -o yaml | kubectl apply -f -
+  register: cert_ns
+  changed_when: cert_ns.rc == 0 and cert_ns.stdout != ''
+  failed_when: cert_ns.rc != 0 and cert_ns.rc != 1
+  become: true
+
+- name: Install cert-manager v1.15.3
+  shell: |
+    kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.15.3/cert-manager.yaml
+  register: cert_apply
+  changed_when: cert_apply.rc == 0
+  failed_when: cert_apply.rc != 0
+  become: true
+
+- name: Wait for cert-manager deployment to be ready (may take a while)
+  shell: |
+    kubectl -n cert-manager rollout status deployment/cert-manager --timeout=300s
+  register: cert_rollout
+  failed_when: cert_rollout.rc != 0
+  become: true

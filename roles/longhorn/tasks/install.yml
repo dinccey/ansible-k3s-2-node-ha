@@ -1,0 +1,57 @@
+---
+- name: Install open-iscsi package (Debian/Ubuntu)
+  apt:
+    name: open-iscsi
+    state: present
+    update_cache: true
+  when: ansible_os_family == 'Debian'
+
+- name: Load iscsi_tcp kernel module
+  command: modprobe iscsi_tcp
+  args:
+    warn: false
+
+- name: Add Longhorn Helm repo
+  shell: |
+    helm repo add longhorn {{ longhorn_chart_repo }}
+  args:
+    creates: /root/.cache/helm/repository/longhorn-index.yaml
+  register: add_repo
+  failed_when: add_repo.rc not in [0,1]
+  changed_when: add_repo.rc == 0
+  when: psql_master | default(false)
+
+- name: Update Helm repos
+  shell: helm repo update
+  register: repo_update
+  failed_when: repo_update.rc != 0
+  when: psql_master | default(false)
+
+- name: Ensure longhorn namespace exists
+  shell: |
+    kubectl get namespace {{ longhorn_namespace }} || kubectl create namespace {{ longhorn_namespace }}
+  register: ns_create
+  changed_when: ns_create.rc == 0 and ns_create.stdout != ''
+  failed_when: ns_create.rc != 0 and ns_create.rc != 1
+  when: psql_master | default(false)
+
+- name: Install Longhorn via Helm if not present
+  shell: |
+    if ! helm -n {{ longhorn_namespace }} status {{ longhorn_release_name }} >/dev/null 2>&1; then
+      helm install {{ longhorn_release_name }} longhorn/longhorn \
+        --namespace {{ longhorn_namespace }} \
+        --version {{ longhorn_version }} \
+        --create-namespace \
+        --set defaultSettings.defaultReplicaCount={{ default_replica_count }} \
+        --set defaultSettings.guaranteedInstanceManagerCPU={{ guaranteed_instance_manager_cpu }}
+    fi
+  register: longhorn_install
+  failed_when: longhorn_install.rc != 0
+  changed_when: longhorn_install.rc == 0 and (longhorn_install.stdout is defined and longhorn_install.stdout != '')
+  when: psql_master | default(false)
+
+- name: Wait for Longhorn pods to be created and show status
+  shell: kubectl -n {{ longhorn_namespace }} get pods
+  register: longhorn_pods
+  failed_when: longhorn_pods.rc != 0
+  when: psql_master | default(false)

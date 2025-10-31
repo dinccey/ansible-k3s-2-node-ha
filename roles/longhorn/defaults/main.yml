@@ -1,0 +1,8 @@
+---
+# Defaults for longhorn role
+longhorn_version: "1.10.0"
+longhorn_namespace: longhorn-system
+longhorn_chart_repo: https://charts.longhorn.io
+longhorn_release_name: longhorn
+default_replica_count: 2
+guaranteed_instance_manager_cpu: 10

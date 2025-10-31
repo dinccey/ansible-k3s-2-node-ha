@@ -44,4 +44,11 @@ vrrp_instance postgres-cluster {
   notify_master "/etc/keepalived/notify.sh MASTER"
   notify_backup "/etc/keepalived/notify.sh BACKUP"
   notify_fault "/etc/keepalived/notify.sh FAULT"
+
+  # GARP for fast ARP cache updates
+  garp_master_delay 1      # Delay before first GARP set after becoming MASTER (default 5s; lower for speed)
+  garp_master_repeat 5     # Number of GARPs in initial burst (default 5; sends 5x quickly)
+  garp_master_refresh 5    # Periodic GARP interval in seconds while MASTER (0=disabled; 5s for ~every few seconds)
+  garp_master_refresh_repeat 3  # GARPs per refresh cycle (default 1; 3x for reliability)
+  vrrp_garp_interval 0.01  # Delay between individual GARPs in ms (default 0; 10ms prevents flooding)
 }
