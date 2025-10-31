@@ -24,7 +24,7 @@ It may be argued though that for many edge use cases the advantage of achieving 
 
 ### Installation
 
-Note: This playbook was only tested on VMs with Ubuntu 18.04 running on vSphere. It will not work in most public cloud environments that don't support VRRP and Gratuitous ARP in their network.
+Note: This playbook was only tested on VMs with Debian 13 running on Proxmox VE. It will not work in most public cloud environments that don't support VRRP and Gratuitous ARP in their network.
 
 #### Prerequisites
 

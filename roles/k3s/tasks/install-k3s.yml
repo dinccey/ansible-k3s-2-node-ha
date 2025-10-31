@@ -65,6 +65,17 @@
     remote_src: yes
     owner: "{{ ansible_user }}"
 
+- name: Ensure user's KUBECONFIG points to their copied kubeconfig
+  lineinfile:
+    path: ~{{ ansible_user }}/.bashrc
+    regexp: '^export KUBECONFIG='
+    line: 'export KUBECONFIG=~/.kube/config'
+    create: yes
+    owner: "{{ ansible_user }}"
+    mode: '0644'
+  become: true
+  become_user: root
+
 - name: Rewrite kubeconfig default context
   command: k3s kubectl config set-cluster default
     --server=https://{{ keepalived_virtual_ip }}:6443
