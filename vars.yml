@@ -1,5 +1,5 @@
 # K3S
-k3s_version: v1.34.1+k3s1
+k3s_version: v1.33.5+k3s1
 k3s_psql_db: postgres
 k3s_psql_user: k3s
 k3s_psql_password: changeme
