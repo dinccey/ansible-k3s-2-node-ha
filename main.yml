@@ -4,4 +4,6 @@
     - {role: 'repmgrd', tags: 'repmgrd'}
     - {role: 'keepalived', tags: 'keepalived'}
     - {role: 'k3s', tags: 'k3s'}
+    - {role: 'helm', tags: 'helm'}
+    - {role: 'longhorn', tags: 'longhorn'}
   become: yes

@@ -7,9 +7,19 @@
   when: ansible_os_family == 'Debian'
 
 - name: Load iscsi_tcp kernel module
-  command: modprobe iscsi_tcp
-  args:
-    warn: false
+  copy:
+    dest: /etc/modules-load.d/iscsi_tcp.conf
+    content: "iscsi_tcp\n"
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+
+- name: Load iscsi_tcp kernel module now (if not already loaded)
+  shell: lsmod | grep iscsi_tcp || modprobe iscsi_tcp
+  register: modprobe_out
+  failed_when: modprobe_out.rc != 0
+  become: true
 
 - name: Add Longhorn Helm repo
   shell: |
@@ -20,12 +30,18 @@
   failed_when: add_repo.rc not in [0,1]
   changed_when: add_repo.rc == 0
   when: psql_master | default(false)
+  become: true
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
 
 - name: Update Helm repos
   shell: helm repo update
   register: repo_update
   failed_when: repo_update.rc != 0
   when: psql_master | default(false)
+  become: true
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
 
 - name: Ensure longhorn namespace exists
   shell: |
@@ -34,6 +50,9 @@
   changed_when: ns_create.rc == 0 and ns_create.stdout != ''
   failed_when: ns_create.rc != 0 and ns_create.rc != 1
   when: psql_master | default(false)
+  become: true
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
 
 - name: Install Longhorn via Helm if not present
   shell: |
@@ -42,16 +61,28 @@
         --namespace {{ longhorn_namespace }} \
         --version {{ longhorn_version }} \
         --create-namespace \
-        --set defaultSettings.defaultReplicaCount={{ default_replica_count }} \
-        --set defaultSettings.guaranteedInstanceManagerCPU={{ guaranteed_instance_manager_cpu }}
+        --set-string defaultSettings.defaultReplicaCount={{ default_replica_count }} \
+        --set-string defaultSettings.guaranteedInstanceManagerCPU={{ guaranteed_instance_manager_cpu }} \
+        --set ingress.enabled=true \
+        --set ingress.host=longhorn.fam.kr \
+        --set ingress.ingressClassName=traefik \
+        --set ingress.tls=false \
+        --set ingress.annotations."traefik.ingress.kubernetes.io/router.entrypoints"="web" \
+        --set ingress.annotations."traefik.ingress.kubernetes.io/router.middlewares"="traefik-default-redirect@kubernetescrd"
     fi
   register: longhorn_install
   failed_when: longhorn_install.rc != 0
   changed_when: longhorn_install.rc == 0 and (longhorn_install.stdout is defined and longhorn_install.stdout != '')
   when: psql_master | default(false)
+  become: true
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
 
 - name: Wait for Longhorn pods to be created and show status
   shell: kubectl -n {{ longhorn_namespace }} get pods
   register: longhorn_pods
   failed_when: longhorn_pods.rc != 0
   when: psql_master | default(false)
+  become: true
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml

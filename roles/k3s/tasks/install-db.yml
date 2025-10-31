@@ -42,7 +42,7 @@
 - name: Create k3s database
   postgresql_db: name={{ k3s_psql_db }} encoding=UTF-8
   become_user: postgres
-  become: yes
+  become: true
   when:
     - psql_master == True
 
@@ -51,7 +51,6 @@
     login_db: "{{ k3s_psql_db }}"  # Changed from 'db'
     name: "{{ k3s_psql_user }}"
     password: "{{ k3s_psql_password }}"
-    privileges: ALL  # Changed from 'priv'
     state: present
   become: true
   become_user: postgres

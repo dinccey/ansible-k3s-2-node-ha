@@ -80,7 +80,8 @@
     kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.15.3/cert-manager.yaml
   register: cert_apply
   changed_when: cert_apply.rc == 0
-  failed_when: cert_apply.rc != 0
+  # kubectl may return rc=1 when some resources already exist (AlreadyExists); treat rc 0 or 1 as non-fatal
+  failed_when: cert_apply.rc not in [0, 1]
   become: true
 
 - name: Wait for cert-manager deployment to be ready (may take a while)
