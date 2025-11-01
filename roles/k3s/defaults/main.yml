@@ -6,3 +6,13 @@ k3s_psql_user: k3s
 k3s_psql_password: changeme
 k3s_cluster_token: changeme
 k3s_systemd_dir: /etc/systemd/system
+# Extra flags appended to the k3s server ExecStart command in the systemd unit
+# By default we disable k3s built-in Traefik so users can install a HA Traefik
+# (for example a DaemonSet) that runs on every node and will accept traffic
+# on whichever node currently owns the VIP.
+extra_server_args: "--disable traefik"
+
+# When true, the role will deploy a simple Traefik v2 DaemonSet (with RBAC)
+# which binds to host ports 80/443 so ingress works from whichever node has
+# the external VIP. Disable this if you plan to install Traefik another way.
+install_traefik_daemonset: true

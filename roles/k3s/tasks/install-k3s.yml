@@ -92,3 +92,21 @@
     src: /usr/local/bin/k3s
     dest: /usr/local/bin/crictl
     state: link
+
+- name: Deploy Traefik DaemonSet manifest (optional)
+  when: install_traefik_daemonset | default(false)
+  block:
+    - name: Copy Traefik manifest to remote host
+      copy:
+        src: files/traefik-daemonset.yaml
+        dest: /tmp/traefik-daemonset.yaml
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Apply Traefik manifest
+      command: /usr/local/bin/k3s kubectl apply -f /tmp/traefik-daemonset.yaml
+      register: traefik_apply
+      retries: 3
+      delay: 5
+      until: traefik_apply.rc == 0

@@ -85,6 +85,29 @@
   environment:
     KUBECONFIG: /etc/rancher/k3s/k3s.yaml
 
+- name: Copy Longhorn StorageClass manifest to host
+  when: psql_master | default(false)
+  copy:
+    src: files/longhorn-storageclass.yaml
+    dest: /tmp/longhorn-storageclass.yaml
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+- name: Apply Longhorn StorageClass
+  when: psql_master | default(false)
+  command: /usr/local/bin/k3s kubectl apply -f /tmp/longhorn-storageclass.yaml
+  register: longhorn_sc_apply
+  retries: 3
+  delay: 5
+  until: longhorn_sc_apply.rc == 0
+  become: true
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
 - name: Wait for Longhorn pods to be created and show status
   shell: kubectl -n {{ longhorn_namespace }} get pods
   register: longhorn_pods

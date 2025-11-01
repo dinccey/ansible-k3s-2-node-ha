@@ -1,0 +1,114 @@
+---
+# Minimal Traefik v2 DaemonSet manifest for HA ingress on small k3s clusters.
+# This runs Traefik as a DaemonSet and binds to host ports 80/443 so any node
+# that receives the external VIP can accept HTTP(S) traffic.
+#
+# NOTE: This is intentionally minimal. In production you should harden RBAC,
+# configure TLS properly, and tune Traefik settings or install via Helm.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: traefik
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: traefik-ingress
+  namespace: traefik
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: traefik-ingress-role
+rules:
+  - apiGroups: [""]
+    resources: ["services", "endpoints", "secrets", "pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["extensions", "networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["" ]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: traefik-ingress-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: traefik-ingress-role
+subjects:
+  - kind: ServiceAccount
+    name: traefik-ingress
+    namespace: traefik
+
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: traefik-ingress
+  namespace: traefik
+  labels:
+    app: traefik
+spec:
+  selector:
+    matchLabels:
+      app: traefik
+  template:
+    metadata:
+      labels:
+        app: traefik
+    spec:
+      serviceAccountName: traefik-ingress
+      hostPID: false
+      containers:
+        - name: traefik
+          image: traefik:v2.12.5
+          args:
+            - "--api.insecure=true"
+            - "--entryPoints.web.address=:80"
+            - "--entryPoints.websecure.address=:443"
+            - "--providers.kubernetesingress"
+          ports:
+            - containerPort: 80
+              hostPort: 80
+              name: web
+            - containerPort: 443
+              hostPort: 443
+              name: websecure
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      tolerations:
+        - operator: "Exists"
+      nodeSelector: {}
+
+---
+# Optional ClusterIP service so internal cluster components can talk to Traefik
+apiVersion: v1
+kind: Service
+metadata:
+  name: traefik
+  namespace: traefik
+  labels:
+    app: traefik
+spec:
+  ports:
+    - name: web
+      port: 80
+      targetPort: 80
+    - name: websecure
+      port: 443
+      targetPort: 443
+  selector:
+    app: traefik
+  type: ClusterIP
