@@ -6,6 +6,13 @@
     update_cache: true
   when: ansible_os_family == 'Debian'
 
+- name: Install nfs package (Debian/Ubuntu)
+  apt:
+    name: nfs-kernel-server
+    state: present
+    update_cache: true
+  when: ansible_os_family == 'Debian'
+
 - name: Load iscsi_tcp kernel module
   copy:
     dest: /etc/modules-load.d/iscsi_tcp.conf
