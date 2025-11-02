@@ -96,9 +96,9 @@
 - name: Deploy Traefik DaemonSet manifest (optional)
   when: install_traefik_daemonset | default(false)
   block:
-    - name: Copy Traefik manifest to remote host
-      copy:
-        src: files/traefik-daemonset.yaml
+    - name: Template Traefik manifest into place
+      template:
+        src: traefik-daemonset.yaml.j2
         dest: /tmp/traefik-daemonset.yaml
         owner: root
         group: root

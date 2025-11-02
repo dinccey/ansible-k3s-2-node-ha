@@ -1,0 +1,142 @@
+---
+# Traefik v2 DaemonSet (templated) — binds host ports 80/443 and exposes the
+# keepalived VIP as an external IP for the Service so `kubectl get svc` shows
+# an EXTERNAL-IP.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: traefik
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: traefik-ingress
+  namespace: traefik
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: traefik-ingress-role
+rules:
+  - apiGroups: [""]
+    resources: ["services", "endpoints", "secrets", "pods", "namespaces", "nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["extensions", "networking.k8s.io"]
+    resources: ["ingresses", "ingressclasses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["extensions", "networking.k8s.io"]
+    resources: ["ingresses/status"]
+    verbs: ["update"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: traefik-ingress-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: traefik-ingress-role
+subjects:
+  - kind: ServiceAccount
+    name: traefik-ingress
+    namespace: traefik
+
+---
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: traefik-ingress
+  namespace: traefik
+  labels:
+    app: traefik
+spec:
+  selector:
+    matchLabels:
+      app: traefik
+  template:
+    metadata:
+      labels:
+        app: traefik
+    spec:
+      serviceAccountName: traefik-ingress
+      hostPID: false
+      containers:
+        - name: traefik
+          image: traefik:v3.5.4
+          args:
+            - "--api.insecure=true"  # Enables dashboard (dev; disable in prod)
+            - "--api.dashboard=true"
+            - "--ping=true"  # Enables /ping endpoint (fixes 404 probe)
+            - "--ping.entrypoint=web"  # Binds /ping to web (80) explicitly
+            - "--log.level=INFO"  # INFO for prod; DEBUG for troubleshooting
+            - "--entryPoints.web.address=:80"
+            - "--entryPoints.websecure.address=:443"
+            - "--providers.kubernetesingress"
+            - "--providers.kubernetesingress.ingressclass=traefik"  # Matches your IngressClass
+          ports:
+            - containerPort: 80
+              hostPort: 80
+              name: web
+            - containerPort: 443
+              hostPort: 443
+              name: websecure
+            - containerPort: 8080
+              name: admin
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: web  # Named port for reliability
+              scheme: HTTP
+            initialDelaySeconds: 10  # Buffer for startup
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /api/version  # Fallback to version endpoint (more robust)
+              port: admin  # 8080 (dashboard port)
+              scheme: HTTP
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 5
+      tolerations:
+        - operator: "Exists"
+      nodeSelector: {}
+
+---
+# Service exposes Traefik inside the cluster and declares the external VIP
+# so `kubectl get svc` will show EXTERNAL-IP. Keepalived must be configured
+# to place the VIP on cluster nodes (already handled by your keepalived role).
+apiVersion: v1
+kind: Service
+metadata:
+  name: traefik
+  namespace: traefik
+  labels:
+    app: traefik
+spec:
+  ports:
+    - name: web
+      port: 80
+      targetPort: web
+    - name: websecure
+      port: 443
+      targetPort: websecure
+    - name: admin
+      port: 8080
+      targetPort: admin
+  selector:
+    app: traefik
+  type: ClusterIP
+  externalTrafficPolicy: Local  # Preserves client IP
+  externalIPs:
+    - {{ keepalived_virtual_ip }}
