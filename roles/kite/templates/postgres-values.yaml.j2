@@ -1,0 +1,41 @@
+replicaCount: {{ postgres_replica_count }}
+
+# PostgreSQL auth (change passwords in production!)
+auth:
+  postgresPassword: "{{ postgres_postgres_password }}"
+  database: "{{ postgres_database }}"
+  username: "{{ postgres_username }}"
+  password: "{{ postgres_password }}"
+
+# Persistence with Longhorn (RWO volumes; auto-reattach on failover)
+primary:
+  persistence:
+    enabled: true
+    storageClass: "longhorn"
+    size: {{ postgres_primary_size }}
+replica:
+  persistence:
+    enabled: true
+    storageClass: "longhorn"
+    size: {{ postgres_replica_size }}
+
+# Resources (tuned for 2-node cluster)
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# Service (ClusterIP for Kite access)
+service:
+  type: ClusterIP
+  port: 5432
+
+# Replication config (enables WAL streaming)
+postgresql:
+  extendedConfiguration: |
+    wal_level = replica
+    max_wal_senders = 10
+    max_replication_slots = 10

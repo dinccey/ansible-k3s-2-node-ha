@@ -1,0 +1,21 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kite-ingress
+  namespace: {{ kite_namespace }}
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+    traefik.ingress.kubernetes.io/router.pathmatcher: PathPrefix
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: "{{ kite_host }}"
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: {{ kite_release_name }}
+            port:
+              number: 8080

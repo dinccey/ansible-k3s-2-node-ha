@@ -1,0 +1,98 @@
+---
+- name: Add helm repos for kite and bitnami
+  shell: |
+    helm repo add kite {{ kite_helm_repo }} || true
+    helm repo add bitnami {{ bitnami_helm_repo }} || true
+    helm repo update
+  environment:
+    KUBECONFIG: "{{ kubeconfig_path }}"
+  register: helm_repos
+  changed_when: false
+
+- name: Render postgres values file
+  template:
+    src: postgres-values.yaml.j2
+    dest: /tmp/postgres-values.yaml
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Install PostgreSQL for Kite if not present
+  shell: |
+    if ! helm -n {{ postgres_namespace }} status {{ postgres_release_name }} >/dev/null 2>&1; then
+      helm install {{ postgres_release_name }} {{ postgres_chart }} \
+        --namespace {{ postgres_namespace }} \
+        --create-namespace \
+        --values /tmp/postgres-values.yaml
+    fi
+  register: postgres_install
+  failed_when: postgres_install.rc != 0
+  changed_when: postgres_install.rc == 0 and (postgres_install.stdout is defined and postgres_install.stdout != '')
+  environment:
+    KUBECONFIG: "{{ kubeconfig_path }}"
+  become: true
+
+- name: Wait for postgres primary statefulset rollout (best-effort)
+  shell: |
+    kubectl -n {{ postgres_namespace }} rollout status statefulset/{{ postgres_release_name }}-postgresql --timeout=300s || true
+  register: postgres_rollout
+  environment:
+    KUBECONFIG: "{{ kubeconfig_path }}"
+  become: true
+
+- name: Extract Kite DB password from secret
+  shell: |
+    kubectl -n {{ postgres_namespace }} get secret {{ postgres_release_name }}-postgresql -o jsonpath="{.data.password}" | base64 -d
+  register: kite_db_password
+  environment:
+    KUBECONFIG: "{{ kubeconfig_path }}"
+  failed_when: kite_db_password.rc != 0
+  become: true
+
+- name: Set DSN fact for Kite
+  set_fact:
+    kite_db_dsn: "postgres://{{ postgres_username }}:{{ kite_db_password.stdout }}@{{ postgres_release_name }}-postgresql.{{ postgres_namespace }}.svc.cluster.local:5432/{{ postgres_database }}"
+
+- name: Render kite values file
+  template:
+    src: kite-values.yaml.j2
+    dest: /tmp/kite-values.yaml
+    owner: root
+    group: root
+    mode: '0644'
+  vars:
+    kite_db_dsn: "{{ kite_db_dsn }}"
+
+- name: Install Kite via Helm if not present
+  shell: |
+    if ! helm -n {{ kite_namespace }} status {{ kite_release_name }} >/dev/null 2>&1; then
+      helm install {{ kite_release_name }} {{ kite_chart }} \
+        --namespace {{ kite_namespace }} \
+        --values /tmp/kite-values.yaml
+    fi
+  register: kite_install
+  failed_when: kite_install.rc != 0
+  changed_when: kite_install.rc == 0 and (kite_install.stdout is defined and kite_install.stdout != '')
+  environment:
+    KUBECONFIG: "{{ kubeconfig_path }}"
+  become: true
+
+- name: Render Kite Ingress manifest
+  template:
+    src: kite-ingress.yaml.j2
+    dest: /tmp/kite-ingress.yaml
+    owner: root
+    group: root
+    mode: '0644'
+  vars:
+    kite_host: "{{ kite_host }}"
+
+- name: Apply Kite Ingress
+  command: /usr/local/bin/k3s kubectl apply -f /tmp/kite-ingress.yaml
+  register: kite_ingress_apply
+  retries: 3
+  delay: 5
+  until: kite_ingress_apply.rc == 0
+  environment:
+    KUBECONFIG: "{{ kubeconfig_path }}"
+  become: true
