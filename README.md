@@ -22,16 +22,22 @@ It may be argued though that for many edge use cases the advantage of achieving 
 - comparable low deployment/upgrade frequency reducing the risk of data loss during a failover.
 - the 2 compute devices typically physically co-located and connected directly via a local switch making split-brain as result of network partitioning unlikely.
 
+`Kite` is installed as dashboard. Configured to work with psql StatefulSet by default.
+`Longhorn` is is installed for storage and used by Kite.
+
 ### Installation
 
 Note: This playbook was only tested on VMs with Debian 13 running on Proxmox VE 9. It will not work in most public cloud environments that don't support VRRP and Gratuitous ARP in their network.
 
 #### Prerequisites
 
-1. Prepare two VMs or physical machines satisfying the k3s hardware requirements.
+1. Prepare two VMs or physical machines satisfying the k3s hardware requirements. Install Debian 13 Trixie for guaranteed compatibility with the script.
 2. Provision your SSH key to the machines such that it is authorized for the `user` user
+```
+ssh-copy-id -i ~/.ssh/id_ed25519.pub user@host
+```
+
 3. Install Ansible on your local machine.
-4. On the nodes, install python3-psyopc2 if an error comes up
 
 #### Deployment
 
