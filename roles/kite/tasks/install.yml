@@ -1,13 +1,17 @@
 ---
 - name: Add helm repos for kite and bitnami
   shell: |
-    helm repo add kite {{ kite_helm_repo }} || true
-    helm repo add bitnami {{ bitnami_helm_repo }} || true
-    helm repo update
+    # Resolve helm binary (prefer system PATH, fall back to /usr/local/bin/helm)
+    HELM=$(command -v helm >/dev/null 2>&1 && command -v helm || echo /usr/local/bin/helm)
+    $HELM repo add kite {{ kite_helm_repo }} || true
+    $HELM repo add bitnami {{ bitnami_helm_repo }} || true
+    $HELM repo update
   environment:
     KUBECONFIG: "{{ kubeconfig_path }}"
   register: helm_repos
   changed_when: false
+  run_once: true
+  delegate_to: "{{ groups['k3s-nodes'][0] }}"
 
 - name: Render postgres values file
   template:
@@ -19,8 +23,9 @@
 
 - name: Install PostgreSQL for Kite if not present
   shell: |
-    if ! helm -n {{ postgres_namespace }} status {{ postgres_release_name }} >/dev/null 2>&1; then
-      helm install {{ postgres_release_name }} {{ postgres_chart }} \
+    HELM=$(command -v helm >/dev/null 2>&1 && command -v helm || echo /usr/local/bin/helm)
+    if ! $HELM -n {{ postgres_namespace }} status {{ postgres_release_name }} >/dev/null 2>&1; then
+      $HELM install {{ postgres_release_name }} {{ postgres_chart }} \
         --namespace {{ postgres_namespace }} \
         --create-namespace \
         --values /tmp/postgres-values.yaml
@@ -32,6 +37,8 @@
     KUBECONFIG: "{{ kubeconfig_path }}"
   become: true
   when: psql_master | default(false)
+  run_once: true
+  delegate_to: "{{ groups['k3s-nodes'][0] }}"
 
 - name: Wait for postgres primary statefulset rollout (best-effort)
   shell: |
@@ -88,11 +95,13 @@
 
 - name: Install or upgrade Kite via Helm
   shell: |
-    helm upgrade --install {{ kite_release_name }} {{ kite_chart }} \
+    HELM=$(command -v helm >/dev/null 2>&1 && command -v helm || echo /usr/local/bin/helm)
+    # Increase timeout to allow resources (PVCs, volumes, init containers) to become ready
+    $HELM upgrade --install {{ kite_release_name }} {{ kite_chart }} \
       --namespace {{ kite_namespace }} \
       --create-namespace \
       --values /tmp/kite-values.yaml \
-      --atomic --wait --timeout 300s
+      --atomic --wait --timeout 900s
   register: kite_install
   failed_when: kite_install.rc != 0
   changed_when: kite_install.rc == 0 and (kite_install.stdout is defined and kite_install.stdout != '')

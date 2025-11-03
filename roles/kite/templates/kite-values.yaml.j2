@@ -21,8 +21,12 @@ resources:
     memory: 256Mi
 
 securityContext:
+  # Container-level securityContext: allowed fields include runAsUser/runAsGroup
   runAsUser: 1000
   runAsGroup: 1000
+
+# Pod-level security context: fsGroup belongs at the pod level (podSecurityContext)
+podSecurityContext:
   fsGroup: 1000
 
 service:
