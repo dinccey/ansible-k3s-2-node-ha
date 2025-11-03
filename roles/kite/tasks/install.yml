@@ -64,19 +64,43 @@
   vars:
     kite_db_dsn: "{{ kite_db_dsn }}"
 
-- name: Install Kite via Helm if not present
+- name: Ensure Kite secret exists (so chart doesn't fallback to sqlite)
   shell: |
-    if ! helm -n {{ kite_namespace }} status {{ kite_release_name }} >/dev/null 2>&1; then
-      helm install {{ kite_release_name }} {{ kite_chart }} \
-        --namespace {{ kite_namespace }} \
-        --values /tmp/kite-values.yaml
+    kubectl -n {{ kite_namespace }} create namespace {{ kite_namespace }} --dry-run=client -o yaml | kubectl apply -f -
+    kubectl -n {{ kite_namespace }} create secret generic {{ kite_release_name }}-secret \
+      --from-literal=DB_TYPE=postgres \
+      --from-literal=DB_DSN='{{ kite_db_dsn }}' \
+      --dry-run=client -o yaml | kubectl apply -f -
+  environment:
+    KUBECONFIG: "{{ kubeconfig_path }}"
+  become: true
+
+- name: Ensure existing kite secret has Helm ownership metadata (labels/annotations)
+  shell: |
+    if kubectl -n {{ kite_namespace }} get secret {{ kite_release_name }}-secret >/dev/null 2>&1; then
+      kubectl -n {{ kite_namespace }} label secret {{ kite_release_name }}-secret app.kubernetes.io/managed-by=Helm --overwrite || true
+      kubectl -n {{ kite_namespace }} annotate secret {{ kite_release_name }}-secret meta.helm.sh/release-name={{ kite_release_name }} --overwrite || true
+      kubectl -n {{ kite_namespace }} annotate secret {{ kite_release_name }}-secret meta.helm.sh/release-namespace={{ kite_namespace }} --overwrite || true
     fi
+  environment:
+    KUBECONFIG: "{{ kubeconfig_path }}"
+  become: true
+
+- name: Install or upgrade Kite via Helm
+  shell: |
+    helm upgrade --install {{ kite_release_name }} {{ kite_chart }} \
+      --namespace {{ kite_namespace }} \
+      --create-namespace \
+      --values /tmp/kite-values.yaml \
+      --atomic --wait --timeout 300s
   register: kite_install
   failed_when: kite_install.rc != 0
   changed_when: kite_install.rc == 0 and (kite_install.stdout is defined and kite_install.stdout != '')
   environment:
     KUBECONFIG: "{{ kubeconfig_path }}"
   become: true
+  run_once: true
+  delegate_to: "{{ groups['k3s-nodes'][0] }}"
 
 - name: Render Kite Ingress manifest
   template:
@@ -97,3 +121,55 @@
   environment:
     KUBECONFIG: "{{ kubeconfig_path }}"
   become: true
+
+- name: Debug- check deployed DB_TYPE in Kite deployment
+  shell: |
+    kubectl -n {{ kite_namespace }} get deploy {{ kite_release_name }} -o jsonpath="{.spec.template.spec.containers[0].env[?(@.name=='DB_TYPE')].value}"
+  register: kite_deployed_db_type
+  failed_when: false
+  changed_when: false
+  run_once: true
+  delegate_to: "{{ groups['k3s-nodes'][0] }}"
+  environment:
+    KUBECONFIG: "{{ kubeconfig_path }}"
+  become: true
+
+- name: If deployment still uses sqlite, dump kite-secret and fail with guidance
+  block:
+    - name: Get kite secret DB_TYPE
+      shell: >-
+        kubectl -n {{ kite_namespace }} get secret {{ kite_release_name }}-secret \
+          -o go-template='{% raw %}{{ index .data "DB_TYPE" }}{% endraw %}' | base64 -d
+      register: kite_secret_db_type
+      failed_when: false
+      changed_when: false
+      run_once: true
+      delegate_to: "{{ groups['k3s-nodes'][0] }}"
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      become: true
+
+    - name: Get kite secret DB_DSN
+      shell: >-
+        kubectl -n {{ kite_namespace }} get secret {{ kite_release_name }}-secret \
+          -o go-template='{% raw %}{{ index .data "DB_DSN" }}{% endraw %}' | base64 -d
+      register: kite_secret_db_dsn
+      failed_when: false
+      changed_when: false
+      run_once: true
+      delegate_to: "{{ groups['k3s-nodes'][0] }}"
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      become: true
+
+    - name: Fail and show diagnostics
+      fail:
+        msg: |
+          Kite deployment still shows DB_TYPE={{ kite_deployed_db_type.stdout | default('<none>') }}.
+          kite-secret contains DB_TYPE={{ kite_secret_db_type.stdout | default('<none>') }} and DB_DSN={{ kite_secret_db_dsn.stdout | default('<none>') }}.
+          Possible causes:
+            - Chart sets DB env vars from values that we didn't override. Run `helm show values {{ kite_chart }}` and check the DB keys.
+            - Chart templates hardcode sqlite in the Deployment; you'll need to set the chart's DB config keys explicitly.
+          I can (A) run `helm show values` and try to auto-detect the correct key, or (B) convert secret/values handling to use the `k8s` module for stronger guarantees.
+      when: kite_deployed_db_type.stdout == 'sqlite'
+  when: kite_deployed_db_type is defined

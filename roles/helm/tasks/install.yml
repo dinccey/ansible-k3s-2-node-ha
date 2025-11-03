@@ -9,6 +9,42 @@
     update_cache: true
   when: ansible_os_family == 'Debian'
 
+- name: Quick pre-check- is helm already installed?
+  command: /usr/local/bin/helm version --short
+  register: helm_check
+  failed_when: false
+  changed_when: false
+
+- name: Install Helm (official script) if missing
+  shell: |
+    curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+  args:
+    creates: /usr/local/bin/helm
+  become: true
+  when: helm_check.rc != 0
+
+# Ensure kubectl is available on all nodes. Some tasks use `kubectl` directly
+# but on k3s installations the binary is `k3s` with a `k3s kubectl` subcommand.
+# Create a small wrapper script `/usr/local/bin/kubectl` that delegates to
+# `k3s kubectl` when `kubectl` is missing.
+- name: Quick pre-check- is kubectl already installed?
+  command: kubectl version --client --short
+  register: kubectl_check
+  failed_when: false
+  changed_when: false
+
+- name: Create /usr/local/bin/kubectl wrapper that delegates to k3s (if missing)
+  copy:
+    dest: /usr/local/bin/kubectl
+    content: |
+      #!/bin/sh
+      # Wrapper to delegate kubectl calls to k3s kubectl when a standalone
+      # kubectl binary is not installed. This file is idempotent.
+      exec /usr/local/bin/k3s kubectl "$@"
+    mode: '0755'
+  become: true
+  when: kubectl_check.rc != 0
+
 - name: Fetch Helm GPG key and dearmor it
   shell: |
     set -o pipefail

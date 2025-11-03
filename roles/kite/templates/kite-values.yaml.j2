@@ -1,10 +1,15 @@
 replicaCount: {{ kite_replica_count }}
 
-extraEnv:
-  - name: DB_TYPE
-    value: postgres
-  - name: DB_DSN
-    value: "postgres://{{ postgres_username }}:{{ kite_db_password.stdout }}@{{ postgres_release_name }}-postgresql.{{ postgres_namespace }}.svc.cluster.local:5432/{{ postgres_database }}"
+# Database configuration
+db:
+    type: postgres
+    dsn: "{{ kite_db_dsn }}"
+
+# Also reference the secret as an envFrom source; the role ensures this secret
+# exists ({{ kite_release_name }}-secret) so charts that prefer secrets will pick it up.
+envFrom:
+  - secretRef:
+      name: {{ kite_release_name }}-secret
 
 # Resources for replicas
 resources:

@@ -45,6 +45,12 @@
     group: root
     mode: 0755
 
+# restart postgresql before checking k3s service so it doesn't hang
+- name: Restart PostgreSQL service
+  systemd:
+    name: postgresql
+    state: restarted  
+
 - name: Enable and check K3s service
   systemd:
     name: k3s
