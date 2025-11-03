@@ -71,7 +71,7 @@
         --set-string defaultSettings.defaultReplicaCount={{ default_replica_count }} \
         --set-string defaultSettings.guaranteedInstanceManagerCPU={{ guaranteed_instance_manager_cpu }} \
         --set ingress.enabled=true \
-        --set ingress.host=longhorn.fam.kr \
+        --set ingress.host={{ longhorn_host }} \
         --set ingress.ingressClassName=traefik \
         --set ingress.tls=false \
         --set ingress.annotations."traefik.ingress.kubernetes.io/router.entrypoints"="web" \

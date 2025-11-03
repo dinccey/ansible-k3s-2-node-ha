@@ -49,6 +49,20 @@ subjects:
     namespace: traefik
 
 ---
+# IngressClass for Traefik so Ingress objects with ingressClassName: "traefik"
+# are bound to this controller. Set the controller to Traefik's recommended
+# value. We avoid making it the cluster default here; adjust the annotation
+# if you want Traefik to be the default ingress class.
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: traefik
+  annotations:
+    ingressclass.kubernetes.io/is-default-class: "true"
+spec:
+  controller: traefik.io/ingress-controller
+
+---
 ---
 apiVersion: apps/v1
 kind: DaemonSet
@@ -81,6 +95,7 @@ spec:
             - "--entryPoints.websecure.address=:443"
             - "--providers.kubernetesingress"
             - "--providers.kubernetesingress.ingressclass=traefik"  # Matches your IngressClass
+            - "--providers.kubernetesingress.namespaces="  # Watch all namespaces
           ports:
             - containerPort: 80
               hostPort: 80

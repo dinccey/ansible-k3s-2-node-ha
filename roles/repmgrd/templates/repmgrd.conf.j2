@@ -1,16 +1,16 @@
 node_id={{ psql_id }}
 node_name={{ inventory_hostname }}
-conninfo='host={{ ansible_host }} user=repmgr dbname=repmgr connect_timeout=2'
+conninfo='host={{ ansible_host }} user=repmgr dbname=repmgr password={{ repmgr_password }} connect_timeout=2'
 data_directory='{{ pg_data_dir }}'
 pg_bindir='{{ pg_bin_dir }}'
 reconnect_attempts=3
 reconnect_interval=2
 priority={{ psql_node_priority }}
 
-service_start_command='sudo pg_ctlcluster 11 main start'
-service_stop_command='sudo pg_ctlcluster 11 main stop'
-service_restart_command='sudo pg_ctlcluster 11 main restart'
-service_reload_command='sudo pg_ctlcluster 11 main reload'
+service_start_command='sudo pg_ctlcluster {{ pg_version }} main start'
+service_stop_command='sudo pg_ctlcluster {{ pg_version }} main stop'
+service_restart_command='sudo pg_ctlcluster {{ pg_version }} main restart'
+service_reload_command='sudo pg_ctlcluster {{ pg_version }} main reload'
 
 log_facility=LOCAL0
 log_level=INFO

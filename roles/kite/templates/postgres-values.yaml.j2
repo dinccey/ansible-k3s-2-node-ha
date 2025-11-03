@@ -1,4 +1,5 @@
-replicaCount: {{ postgres_replica_count }}
+# Only one primary instance
+replicaCount: 1
 
 # PostgreSQL auth (change passwords in production!)
 auth:
@@ -7,17 +8,18 @@ auth:
   username: "{{ postgres_username }}"
   password: "{{ postgres_password }}"
 
-# Persistence with Longhorn (RWO volumes; auto-reattach on failover)
+# Persistence with Longhorn (RWO volume; auto-reattach on failover)
 primary:
   persistence:
     enabled: true
     storageClass: "longhorn"
     size: {{ postgres_primary_size }}
+
+# No replicas needed
 replica:
+  replicaCount: 0
   persistence:
-    enabled: true
-    storageClass: "longhorn"
-    size: {{ postgres_replica_size }}
+    enabled: false
 
 # Resources (tuned for 2-node cluster)
 resources:
@@ -33,9 +35,8 @@ service:
   type: ClusterIP
   port: 5432
 
-# Replication config (enables WAL streaming)
+# No replication config needed for single-node
 postgresql:
   extendedConfiguration: |
-    wal_level = replica
-    max_wal_senders = 10
-    max_replication_slots = 10
+    # keep minimal config, remove WAL streaming
+    max_connections = 100

@@ -31,6 +31,7 @@
   environment:
     KUBECONFIG: "{{ kubeconfig_path }}"
   become: true
+  when: psql_master | default(false)
 
 - name: Wait for postgres primary statefulset rollout (best-effort)
   shell: |
@@ -85,7 +86,7 @@
     group: root
     mode: '0644'
   vars:
-    kite_host: "{{ kite_host }}"
+    kite_host: "{{ kite_domain }}"
 
 - name: Apply Kite Ingress
   command: /usr/local/bin/k3s kubectl apply -f /tmp/kite-ingress.yaml

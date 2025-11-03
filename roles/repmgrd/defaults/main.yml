@@ -1,4 +1,5 @@
-repmgr_db_user_pass: "changeme"
+repmgr_password: "changeme"
+repmgr_db_user_pass: "{{ repmgr_password }}"
 repmgrd_service_name: "repmgrd"
 repmgrd_service: "/etc/systemd/system/repmgrd.service"
 repmgrd_bin: "/usr/lib/postgresql/{{ pg_version }}/bin/repmgrd"

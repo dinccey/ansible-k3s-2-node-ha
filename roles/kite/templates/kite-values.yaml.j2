@@ -1,8 +1,10 @@
 replicaCount: {{ kite_replica_count }}
 
 extraEnv:
-  - name: KITE_DB_DSN
-    value: "{{ kite_db_dsn }}"
+  - name: DB_TYPE
+    value: postgres
+  - name: DB_DSN
+    value: "postgres://{{ postgres_username }}:{{ kite_db_password.stdout }}@{{ postgres_release_name }}-postgresql.{{ postgres_namespace }}.svc.cluster.local:5432/{{ postgres_database }}"
 
 # Resources for replicas
 resources:

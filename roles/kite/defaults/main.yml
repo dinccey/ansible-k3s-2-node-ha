@@ -25,4 +25,4 @@ bitnami_helm_repo: https://charts.bitnami.com/bitnami
 kubeconfig_path: /etc/rancher/k3s/k3s.yaml
 
 # Traefik ingress host for kite (change in inventory for production)
-kite_host: "kite.fam.kr"
+kite_domain: "kite.fam.kr"

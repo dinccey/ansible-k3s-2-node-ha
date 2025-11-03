@@ -37,6 +37,14 @@
     ansible_postgresql_user: "{{ postgresql_user }}"  # Optional: Connection user alias (defaults to postgres)
   ignore_errors: yes  # Keeps it non-blocking
 
+- name: Ensure repmgr extension is installed in repmgr DB
+  command: psql -d repmgr -c "CREATE EXTENSION IF NOT EXISTS repmgr;"
+  become: true
+  become_user: postgres
+  register: repmgr_extension
+  failed_when: repmgr_extension.rc not in [0,1]
+  changed_when: repmgr_extension.rc == 0
+
 - name: Register repmgr primary
   command: repmgr -f {{ repmgrd_config }} primary register --force
   register: repmgr_log

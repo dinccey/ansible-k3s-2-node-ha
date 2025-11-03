@@ -4,6 +4,7 @@ k3s_psql_db: postgres
 k3s_psql_user: k3s
 k3s_psql_password: changeme
 k3s_cluster_token: changeme
+repmgr_password: repmgr-pass-123
 
 # Keepalived
 keepalived_vrrp_iface: "ens18" #ip addr show ens18

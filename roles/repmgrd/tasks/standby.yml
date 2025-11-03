@@ -5,15 +5,37 @@
   file: path="{{ pg_data_dir }}/*" state=absent
 
 - name: cloning db
-  command: repmgr -h {{ hostvars[groups['k3s-nodes'][0]]['ansible_host'] }} -U repmgr -d repmgr -f {{ repmgrd_config }} standby clone -F
+  command: >
+    repmgr
+    -h {{ hostvars[groups['k3s-nodes'][0]]['ansible_host'] }}
+    -U repmgr
+    -d repmgr
+    -f {{ repmgrd_config }}
+    standby clone -F
   become: true
   become_user: postgres
+  environment:
+    PGPASSWORD: "{{ repmgr_password }}"
 
 - name: start postgres
   service: name=postgresql state=started
 
+- name: wait for postgresql to be ready
+  wait_for:
+    host: localhost
+    port: 5432
+    timeout: 30
+    state: started
+
 - name: register standby
-  command: repmgr -f {{ repmgrd_config }} standby register --force
+  command: >
+    repmgr -f {{ repmgrd_config }}
+    -h {{ hostvars[groups['k3s-nodes'][0]]['ansible_host'] }}
+    -U repmgr
+    -d repmgr
+    standby register --force
+  environment:
+    PGPASSWORD: "{{ repmgr_password }}"
   register: repmgr_log
   become: true
   become_user: postgres
