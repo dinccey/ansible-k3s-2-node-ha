@@ -4,10 +4,8 @@ postgres_release_name: kite-postgres
 postgres_chart: bitnami/postgresql
 postgres_namespace: kite
 postgres_replica_count: 2
-postgres_postgres_password: "change-me-123"
 postgres_database: kite
 postgres_username: kite
-postgres_password: "kite-pass-123"
 postgres_primary_size: 3Gi
 postgres_replica_size: 3Gi
 
@@ -23,6 +21,3 @@ bitnami_helm_repo: https://charts.bitnami.com/bitnami
 
 # KUBECONFIG used for kubectl/helm interactions
 kubeconfig_path: /etc/rancher/k3s/k3s.yaml
-
-# Traefik ingress host for kite (change in inventory for production)
-kite_domain: "kite.fam.kr"

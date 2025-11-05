@@ -6,4 +6,3 @@ longhorn_chart_repo: https://charts.longhorn.io
 longhorn_release_name: longhorn
 default_replica_count: 2
 guaranteed_instance_manager_cpu: 10
-longhorn_host: "longhorn.fam.kr"

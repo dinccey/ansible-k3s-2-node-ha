@@ -8,3 +8,8 @@ wal_log_hints = on
 archive_mode = on
 archive_command = '/bin/true'
 shared_preload_libraries = 'repmgr'
+
+# Synchronous replication, untested
+#synchronous_commit = {{ pg_synchronous_commit | default('remote_write') }}
+#synchronous_standby_names = '{{ pg_synchronous_standby_names }}'
+
