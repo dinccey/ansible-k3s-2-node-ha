@@ -1,0 +1,80 @@
+# Values for bitnami/postgresql-ha
+repmgr:
+  enabled: true
+  username: repmgr
+  password: "{{ postgres_ha_repmgr_password }}"
+  database: repmgr
+  syncReplicas: true
+
+# Primary + 1 replica
+replicaCount: {{ postgres_replica_count | default(2) }}
+
+# Auth
+auth:
+  enablePostgresUser: true
+  postgresPassword: "{{ postgres_password }}"
+  database: "{{ postgres_database }}"
+  username: "{{ postgres_username }}"
+  password: "{{ postgres_password }}"
+  existingSecret: ""
+
+# Longhorn persistence (replica count from global var)
+primary:
+  persistence:
+    enabled: true
+    storageClass: "longhorn"
+    size: {{ postgres_primary_size }}
+    annotations:
+      longhorn.io/numberOfReplicas: "{{ longhorn_default_replicas | default('2') }}"
+      longhorn.io/dataLocality: "{{ longhorn_data_locality | default('best-effort') }}"
+      longhorn.io/dataEngine: "v2"
+replica:
+  persistence:
+    enabled: true
+    storageClass: "longhorn"
+    size: {{ postgres_replica_size }}
+    annotations:
+      longhorn.io/numberOfReplicas: "{{ longhorn_default_replicas | default('2') }}"
+      longhorn.io/dataLocality: "{{ longhorn_data_locality | default('best-effort') }}"
+      longhorn.io/dataEngine: "v2"
+
+# PgBouncer / pooler
+pooler:
+  enabled: true
+  # adjust pooler values if needed
+
+# Resources
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# Affinity: spread across nodes
+affinity:
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: postgresql
+        topologyKey: kubernetes.io/hostname
+
+# PDBs
+primary:
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+replica:
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+# WAL replication tuning
+postgresql:
+  extendedConfiguration: |
+    wal_level = replica
+    max_wal_senders = 10
+    max_replication_slots = 10
+    synchronous_commit = on

@@ -1,0 +1,11 @@
+- name: Restart K3s
+  systemd:
+    name: k3s
+    daemon_reload: true
+    state: restarted
+    enabled: true
+  become: true
+
+- name: Wait for API server to stabilize
+  pause:
+    seconds: 10

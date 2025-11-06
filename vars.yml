@@ -2,10 +2,45 @@
 k3s_version: v1.33.5+k3s1
 k3s_psql_db: postgres
 k3s_psql_user: k3s
-k3s_psql_password: changeme
-k3s_cluster_token: changeme
-repmgr_password: repmgr-pass-123
+k3s_psql_password: Tn6D2HFvf8RxDvG6
+k3s_cluster_token: cSeWvbD8FHRbLGuM
+repmgr_password: Tn6D2HFvf8RxDvG6
 
 # Keepalived
 keepalived_vrrp_iface: "ens18" #ip addr show ens18
-keepalived_virtual_ip: "192.168.8.55"
+keepalived_virtual_ip: "192.168.20.55"
+
+
+# Kite
+kite_domain: "kite.k3s.zg"
+postgres_postgres_password: suKiSge2BS2V4KRr
+postgres_password: suKiSge2BS2V4KRr
+postgres_ha_release: "postgres-ha"  
+kite_db_password: "suKiSge2BS2V4KRr"
+
+# Longhorn
+longhorn_host: "longhorn.k3s.zg"
+
+# Experimental
+pg_synchronous_commit: remote_write     # on | remote_write | remote_apply
+pg_synchronous_standby_names: "node2"   # or "ANY 1 (node2)" with quorum syntax
+pg_sync_standby_name: "node2"           # used in primary_conninfo application_name
+
+# FAST FAILOVER & LONGHORN / K3S TUNING
+# K3s etcd tuning (ms)
+k3s_etcd_heartbeat_interval: 100      # ms (default 500) → detect failure faster
+k3s_etcd_election_timeout: 1000       # ms (default 5000)
+
+
+# Longhorn settings (preferred to be editable here)
+longhorn_default_replicas: 2
+longhorn_replica_rebuild_offline: true
+longhorn_data_locality: best-effort
+longhorn_allow_degraded: true
+longhorn_force_delete_terminating_pods_on_node_down: true
+
+# Kite / Postgres defaults (override role defaults if needed)
+kite_replica_count: 1
+postgres_ha: true
+postgres_ha_repmgr_password: "{{ repmgr_password }}"
+

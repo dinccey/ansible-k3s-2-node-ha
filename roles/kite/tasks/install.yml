@@ -1,15 +1,15 @@
 ---
-- name: Add helm repos for kite and bitnami
-  shell: |
-    # Resolve helm binary (prefer system PATH, fall back to /usr/local/bin/helm)
-    HELM=$(command -v helm >/dev/null 2>&1 && command -v helm || echo /usr/local/bin/helm)
-    $HELM repo add kite {{ kite_helm_repo }} || true
-    $HELM repo add bitnami {{ bitnami_helm_repo }} || true
-    $HELM repo update
-  environment:
-    KUBECONFIG: "{{ kubeconfig_path }}"
-  register: helm_repos
-  changed_when: false
+- name: Add Bitnami Helm repo
+  kubernetes.core.helm_repository:
+    name: bitnami
+    repo_url: "{{ bitnami_helm_repo }}"
+  run_once: true
+  delegate_to: "{{ groups['k3s-nodes'][0] }}"
+
+- name: Add Kite Helm repo
+  kubernetes.core.helm_repository:
+    name: kite
+    repo_url: "{{ kite_helm_repo }}"
   run_once: true
   delegate_to: "{{ groups['k3s-nodes'][0] }}"
 
@@ -17,96 +17,116 @@
   template:
     src: postgres-values.yaml.j2
     dest: /tmp/postgres-values.yaml
-    owner: root
-    group: root
     mode: '0644'
+  become: true
+  run_once: true
+  delegate_to: "{{ groups['k3s-nodes'][0] }}"
 
-- name: Install PostgreSQL for Kite if not present
-  shell: |
-    HELM=$(command -v helm >/dev/null 2>&1 && command -v helm || echo /usr/local/bin/helm)
-    if ! $HELM -n {{ postgres_namespace }} status {{ postgres_release_name }} >/dev/null 2>&1; then
-      $HELM install {{ postgres_release_name }} {{ postgres_chart }} \
-        --namespace {{ postgres_namespace }} \
-        --create-namespace \
-        --values /tmp/postgres-values.yaml
-    fi
-  register: postgres_install
-  failed_when: postgres_install.rc != 0
-  changed_when: postgres_install.rc == 0 and (postgres_install.stdout is defined and postgres_install.stdout != '')
-  environment:
-    KUBECONFIG: "{{ kubeconfig_path }}"
+- name: Install or upgrade PostgreSQL for Kite
+  kubernetes.core.helm:
+    name: "{{ postgres_ha_release }}"
+    chart_ref: "{{ postgres_chart }}"
+    release_namespace: "{{ postgres_namespace }}"
+    create_namespace: true
+    values_files:
+      - /tmp/postgres-values.yaml
+    wait: true
+    timeout: 300s
+    atomic: true
+    kubeconfig: "{{ kubeconfig_path }}"
   become: true
   when: psql_master | default(false)
   run_once: true
   delegate_to: "{{ groups['k3s-nodes'][0] }}"
 
-- name: Wait for postgres primary statefulset rollout (best-effort)
-  shell: |
-    kubectl -n {{ postgres_namespace }} rollout status statefulset/{{ postgres_release_name }}-postgresql --timeout=300s || true
+- name: Wait for postgres primary statefulset rollout
+  command: kubectl -n {{ postgres_namespace }} rollout status statefulset/{{ postgres_ha_release }}-postgresql --timeout=300s
   register: postgres_rollout
+  retries: 3
+  delay: 10
+  until: postgres_rollout.rc == 0
   environment:
     KUBECONFIG: "{{ kubeconfig_path }}"
   become: true
+  run_once: true
+  delegate_to: "{{ groups['k3s-nodes'][0] }}"
 
 - name: Extract Kite DB password from secret
-  shell: |
-    kubectl -n {{ postgres_namespace }} get secret {{ postgres_release_name }}-postgresql -o jsonpath="{.data.password}" | base64 -d
-  register: kite_db_password
-  environment:
-    KUBECONFIG: "{{ kubeconfig_path }}"
-  failed_when: kite_db_password.rc != 0
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    name: "{{ postgres_ha_release }}-postgresql"
+    namespace: "{{ postgres_namespace }}"
+    kubeconfig: "{{ kubeconfig_path }}"
+  register: postgres_secret
   become: true
+  run_once: true
+  delegate_to: "{{ groups['k3s-nodes'][0] }}"
+
+- name: Set kite_db_password fact from secret
+  set_fact:
+    kite_db_password: "{{ postgres_secret.resources[0].data.password | b64decode }}"
 
 - name: Set DSN fact for Kite
   set_fact:
-    kite_db_dsn: "postgres://{{ postgres_username }}:{{ kite_db_password.stdout }}@{{ postgres_release_name }}-postgresql.{{ postgres_namespace }}.svc.cluster.local:5432/{{ postgres_database }}"
+    kite_db_dsn: "postgres://{{ postgres_username }}:{{ kite_db_password }}@{{ postgres_ha_release }}-postgresql.{{ postgres_namespace }}.svc.cluster.local:5432/{{ postgres_database }}"
 
 - name: Render kite values file
   template:
     src: kite-values.yaml.j2
     dest: /tmp/kite-values.yaml
-    owner: root
-    group: root
     mode: '0644'
-  vars:
-    kite_db_dsn: "{{ kite_db_dsn }}"
-
-- name: Ensure Kite secret exists (so chart doesn't fallback to sqlite)
-  shell: |
-    kubectl -n {{ kite_namespace }} create namespace {{ kite_namespace }} --dry-run=client -o yaml | kubectl apply -f -
-    kubectl -n {{ kite_namespace }} create secret generic {{ kite_release_name }}-secret \
-      --from-literal=DB_TYPE=postgres \
-      --from-literal=DB_DSN='{{ kite_db_dsn }}' \
-      --dry-run=client -o yaml | kubectl apply -f -
-  environment:
-    KUBECONFIG: "{{ kubeconfig_path }}"
   become: true
+  run_once: true
+  delegate_to: "{{ groups['k3s-nodes'][0] }}"
 
-- name: Ensure existing kite secret has Helm ownership metadata (labels/annotations)
-  shell: |
-    if kubectl -n {{ kite_namespace }} get secret {{ kite_release_name }}-secret >/dev/null 2>&1; then
-      kubectl -n {{ kite_namespace }} label secret {{ kite_release_name }}-secret app.kubernetes.io/managed-by=Helm --overwrite || true
-      kubectl -n {{ kite_namespace }} annotate secret {{ kite_release_name }}-secret meta.helm.sh/release-name={{ kite_release_name }} --overwrite || true
-      kubectl -n {{ kite_namespace }} annotate secret {{ kite_release_name }}-secret meta.helm.sh/release-namespace={{ kite_namespace }} --overwrite || true
-    fi
-  environment:
-    KUBECONFIG: "{{ kubeconfig_path }}"
+- name: Ensure Kite namespace exists
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ kite_namespace }}"
+    kubeconfig: "{{ kubeconfig_path }}"
   become: true
+  run_once: true
+  delegate_to: "{{ groups['k3s-nodes'][0] }}"
+
+- name: Ensure Kite secret exists with DB config
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: "{{ kite_release_name }}-secret"
+        namespace: "{{ kite_namespace }}"
+        labels:
+          app.kubernetes.io/managed-by: Helm
+        annotations:
+          meta.helm.sh/release-name: "{{ kite_release_name }}"
+          meta.helm.sh/release-namespace: "{{ kite_namespace }}"
+      type: Opaque
+      data:
+        DB_TYPE: "{{ 'postgres' | b64encode }}"
+        DB_DSN: "{{ kite_db_dsn | b64encode }}"
+    kubeconfig: "{{ kubeconfig_path }}"
+  become: true
+  run_once: true
+  delegate_to: "{{ groups['k3s-nodes'][0] }}"
 
 - name: Install or upgrade Kite via Helm
-  shell: |
-    HELM=$(command -v helm >/dev/null 2>&1 && command -v helm || echo /usr/local/bin/helm)
-    # Increase timeout to allow resources (PVCs, volumes, init containers) to become ready
-    $HELM upgrade --install {{ kite_release_name }} {{ kite_chart }} \
-      --namespace {{ kite_namespace }} \
-      --create-namespace \
-      --values /tmp/kite-values.yaml \
-      --atomic --wait --timeout 900s
-  register: kite_install
-  failed_when: kite_install.rc != 0
-  changed_when: kite_install.rc == 0 and (kite_install.stdout is defined and kite_install.stdout != '')
-  environment:
-    KUBECONFIG: "{{ kubeconfig_path }}"
+  kubernetes.core.helm:
+    name: "{{ kite_release_name }}"
+    chart_ref: "{{ kite_chart }}"
+    release_namespace: "{{ kite_namespace }}"
+    values_files:
+      - /tmp/kite-values.yaml
+    wait: true
+    timeout: 900s
+    atomic: true
+    kubeconfig: "{{ kubeconfig_path }}"
   become: true
   run_once: true
   delegate_to: "{{ groups['k3s-nodes'][0] }}"
@@ -115,61 +135,52 @@
   template:
     src: kite-ingress.yaml.j2
     dest: /tmp/kite-ingress.yaml
-    owner: root
-    group: root
     mode: '0644'
-  vars:
-    kite_host: "{{ kite_domain }}"
-
-- name: Apply Kite Ingress
-  command: /usr/local/bin/k3s kubectl apply -f /tmp/kite-ingress.yaml
-  register: kite_ingress_apply
-  retries: 3
-  delay: 5
-  until: kite_ingress_apply.rc == 0
-  environment:
-    KUBECONFIG: "{{ kubeconfig_path }}"
   become: true
-
-- name: Debug- check deployed DB_TYPE in Kite deployment
-  shell: |
-    kubectl -n {{ kite_namespace }} get deploy {{ kite_release_name }} -o jsonpath="{.spec.template.spec.containers[0].env[?(@.name=='DB_TYPE')].value}"
-  register: kite_deployed_db_type
-  failed_when: false
-  changed_when: false
   run_once: true
   delegate_to: "{{ groups['k3s-nodes'][0] }}"
+
+- name: Apply Kite Ingress
+  kubernetes.core.k8s:
+    src: /tmp/kite-ingress.yaml
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+  become: true
+  run_once: true
+  delegate_to: "{{ groups['k3s-nodes'][0] }}"
+
+- name: Debug- check deployed DB_TYPE in Kite deployment
+  command: kubectl -n {{ kite_namespace }} get deploy {{ kite_release_name }} -o jsonpath="{.spec.template.spec.containers[0].env[?(@.name=='DB_TYPE')].value}"
+  register: kite_deployed_db_type
+  failed_when: false
   environment:
     KUBECONFIG: "{{ kubeconfig_path }}"
   become: true
+  run_once: true
+  delegate_to: "{{ groups['k3s-nodes'][0] }}"
 
 - name: If deployment still uses sqlite, dump kite-secret and fail with guidance
+  when: kite_deployed_db_type.stdout == 'sqlite'
   block:
     - name: Get kite secret DB_TYPE
-      shell: >-
-        kubectl -n {{ kite_namespace }} get secret {{ kite_release_name }}-secret \
-          -o go-template='{% raw %}{{ index .data "DB_TYPE" }}{% endraw %}' | base64 -d
+      command: kubectl -n {{ kite_namespace }} get secret {{ kite_release_name }}-secret -o jsonpath="{.data.DB_TYPE}" | base64 -d
       register: kite_secret_db_type
       failed_when: false
-      changed_when: false
-      run_once: true
-      delegate_to: "{{ groups['k3s-nodes'][0] }}"
       environment:
         KUBECONFIG: "{{ kubeconfig_path }}"
       become: true
+      run_once: true
+      delegate_to: "{{ groups['k3s-nodes'][0] }}"
 
     - name: Get kite secret DB_DSN
-      shell: >-
-        kubectl -n {{ kite_namespace }} get secret {{ kite_release_name }}-secret \
-          -o go-template='{% raw %}{{ index .data "DB_DSN" }}{% endraw %}' | base64 -d
+      command: kubectl -n {{ kite_namespace }} get secret {{ kite_release_name }}-secret -o jsonpath="{.data.DB_DSN}" | base64 -d
       register: kite_secret_db_dsn
       failed_when: false
-      changed_when: false
-      run_once: true
-      delegate_to: "{{ groups['k3s-nodes'][0] }}"
       environment:
         KUBECONFIG: "{{ kubeconfig_path }}"
       become: true
+      run_once: true
+      delegate_to: "{{ groups['k3s-nodes'][0] }}"
 
     - name: Fail and show diagnostics
       fail:
@@ -180,5 +191,3 @@
             - Chart sets DB env vars from values that we didn't override. Run `helm show values {{ kite_chart }}` and check the DB keys.
             - Chart templates hardcode sqlite in the Deployment; you'll need to set the chart's DB config keys explicitly.
           I can (A) run `helm show values` and try to auto-detect the correct key, or (B) convert secret/values handling to use the `k8s` module for stronger guarantees.
-      when: kite_deployed_db_type.stdout == 'sqlite'
-  when: kite_deployed_db_type is defined

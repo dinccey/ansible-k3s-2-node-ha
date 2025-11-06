@@ -1,0 +1,6 @@
+# Fast failover tuning
+etcd-heartbeat-interval: {{ k3s_etcd_heartbeat_interval }}
+etcd-election-timeout: {{ k3s_etcd_election_timeout }}
+kube-controller-manager-arg:
+  - "node-monitor-grace-period=10s"
+  - "node-monitor-period=2s"

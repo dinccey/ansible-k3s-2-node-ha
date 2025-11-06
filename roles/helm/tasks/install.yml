@@ -1,4 +1,6 @@
 ---
+# roles/helm/tasks/install.yml
+
 - name: Ensure apt dependencies for Helm are installed (Debian/Ubuntu)
   apt:
     name:
@@ -7,9 +9,10 @@
       - apt-transport-https
     state: present
     update_cache: true
+  become: true
   when: ansible_os_family == 'Debian'
 
-- name: Quick pre-check- is helm already installed?
+- name: Quick pre-check - is helm already installed?
   command: /usr/local/bin/helm version --short
   register: helm_check
   failed_when: false
@@ -23,11 +26,7 @@
   become: true
   when: helm_check.rc != 0
 
-# Ensure kubectl is available on all nodes. Some tasks use `kubectl` directly
-# but on k3s installations the binary is `k3s` with a `k3s kubectl` subcommand.
-# Create a small wrapper script `/usr/local/bin/kubectl` that delegates to
-# `k3s kubectl` when `kubectl` is missing.
-- name: Quick pre-check- is kubectl already installed?
+- name: Quick pre-check - is kubectl already installed?
   command: kubectl version --client --short
   register: kubectl_check
   failed_when: false
@@ -38,8 +37,7 @@
     dest: /usr/local/bin/kubectl
     content: |
       #!/bin/sh
-      # Wrapper to delegate kubectl calls to k3s kubectl when a standalone
-      # kubectl binary is not installed. This file is idempotent.
+      # Wrapper to delegate kubectl calls to k3s kubectl when standalone kubectl is missing
       exec /usr/local/bin/k3s kubectl "$@"
     mode: '0755'
   become: true
@@ -63,47 +61,102 @@
     mode: '0644'
   become: true
 
-- name: Update apt cache
+- name: Install Kubernetes Python client
   apt:
-    update_cache: true
-  when: ansible_os_family == 'Debian'
-
-- name: Install Helm package
-  apt:
-    name: "{{ helm_package }}"
+    name: python3-kubernetes
     state: present
-  when: ansible_os_family == 'Debian'
+    update_cache: yes
+  become: true
 
-- name: Ensure kube config directory exists for kube user
+- name: Wait for /etc/rancher/k3s/k3s.yaml to exist (kubeconfig)
+  wait_for:
+    path: /etc/rancher/k3s/k3s.yaml
+    state: present
+    timeout: 300
+  become: true
+
+- name: Validate kubeconfig file using kubectl
+  shell: |
+    /usr/local/bin/k3s kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml cluster-info
+  register: kubeconfig_validation
+  retries: 5
+  delay: 10
+  until: kubeconfig_validation.rc == 0
+  become: true
+
+- name: Debug API server connectivity
+  shell: |
+    curl -k https://{{ keepalived_virtual_ip }}:6443/healthz
+  register: api_health_check
+  retries: 5
+  delay: 10
+  until: api_health_check.rc == 0
+  become: true
+
+- name: Debug kubeconfig file existence and content
+  debug:
+    msg: "Kubeconfig file content: {{ lookup('file', '/etc/rancher/k3s/k3s.yaml') }}"
+  when: ansible_facts['os_family'] == 'Linux'
+
+- name: Ensure kubeconfig file has correct permissions
   file:
-    path: "/home/{{ kube_user }}/.kube"
-    state: directory
-    owner: "{{ kube_user }}"
-    group: "{{ kube_user }}"
-    mode: '0700'
+    path: /etc/rancher/k3s/k3s.yaml
+    owner: root
+    group: root
+    mode: '0644'
   become: true
 
-- name: Copy k3s kubeconfig into user's kube config
-  copy:
-    src: /etc/rancher/k3s/k3s.yaml
-    dest: "/home/{{ kube_user }}/.kube/config"
-    remote_src: yes
-    owner: "{{ kube_user }}"
-    group: "{{ kube_user }}"
-    mode: '0600'
+- name: Debug kubeconfig file permissions on all nodes
+  stat:
+    path: /etc/rancher/k3s/k3s.yaml
+  register: kubeconfig_stat
   become: true
-  when: ansible_facts['os_family'] == 'Debian' or ansible_facts['os_family'] == 'RedHat'
+
+- name: Debug kubeconfig file details
+  debug:
+    msg:
+      - "Kubeconfig file exists: {{ kubeconfig_stat.stat.exists }}"
+      - "Kubeconfig file owner: {{ kubeconfig_stat.stat.pw_name }}"
+      - "Kubeconfig file group: {{ kubeconfig_stat.stat.gr_name }}"
+      - "Kubeconfig file mode: {{ kubeconfig_stat.stat.mode | string | regex_replace('^0o', '0') }}"
+
+- name: Wait until K3s API is responsive via k3s kubectl
+  shell: |
+    /usr/local/bin/k3s kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml get nodes
+  register: k3s_api_check
+  retries: 60
+  delay: 5
+  until: k3s_api_check.rc == 0
+  failed_when: false
+  become: true
+
+- name: Wait for K3s API server to be ready (Node Ready)
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Node
+    wait: yes
+    wait_condition:
+      type: Ready
+      status: "True"
+    wait_timeout: 300
+    kubeconfig: /etc/rancher/k3s/k3s.yaml
+  register: k8s_info_debug
+  become: true
+
+- name: Debug Kubernetes Core Module output
+  debug:
+    var: k8s_info_debug
 
 - name: Ensure KUBECONFIG export is present in user's .bashrc
   lineinfile:
     path: "/home/{{ kube_user }}/.bashrc"
-    line: "export KUBECONFIG=~/.kube/config"
+    line: 'export KUBECONFIG=~/.kube/config'
     create: true
     state: present
   become: true
   become_user: "{{ kube_user }}"
 
-- name: Create cert-manager namespace manifest (if missing) and apply
+- name: Create cert-manager namespace (idempotent)
   shell: |
     kubectl create namespace cert-manager --dry-run=client -o yaml | kubectl apply -f -
   register: cert_ns
@@ -116,13 +169,33 @@
     kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.15.3/cert-manager.yaml
   register: cert_apply
   changed_when: cert_apply.rc == 0
-  # kubectl may return rc=1 when some resources already exist (AlreadyExists); treat rc 0 or 1 as non-fatal
   failed_when: cert_apply.rc not in [0, 1]
   become: true
 
-- name: Wait for cert-manager deployment to be ready (may take a while)
-  shell: |
-    kubectl -n cert-manager rollout status deployment/cert-manager --timeout=300s
-  register: cert_rollout
-  failed_when: cert_rollout.rc != 0
+- name: Wait for cert-manager namespace to exist
+  kubernetes.core.k8s:
+    kubeconfig: /etc/rancher/k3s/k3s.yaml
+    state: present
+    kind: Namespace
+    name: cert-manager
+  register: ns_check
+  until: ns_check is succeeded
+  retries: 30
+  delay: 10
+    
+  become: true
+
+- name: Wait for cert-manager deployment to be ready
+  kubernetes.core.k8s:
+    kubeconfig: /etc/rancher/k3s/k3s.yaml
+    state: present
+    kind: Deployment
+    name: cert-manager
+    namespace: cert-manager
+    wait: true
+    wait_condition:
+      type: Available
+      status: "True"
+    wait_timeout: 300
+    
   become: true

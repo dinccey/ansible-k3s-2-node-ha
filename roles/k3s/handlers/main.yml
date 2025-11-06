@@ -3,3 +3,9 @@
     name: postgresql
     state: restarted
     enabled: yes
+
+- name: restart k3s
+  systemd:
+    name: k3s
+    state: restarted
+    enabled: yes

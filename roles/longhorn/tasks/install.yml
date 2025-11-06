@@ -61,25 +61,23 @@
   environment:
     KUBECONFIG: /etc/rancher/k3s/k3s.yaml
 
-- name: Install Longhorn via Helm if not present
+- name: Install or upgrade Longhorn via Helm
   shell: |
-    if ! helm -n {{ longhorn_namespace }} status {{ longhorn_release_name }} >/dev/null 2>&1; then
-      helm install {{ longhorn_release_name }} longhorn/longhorn \
-        --namespace {{ longhorn_namespace }} \
-        --version {{ longhorn_version }} \
-        --create-namespace \
-        --set-string defaultSettings.defaultReplicaCount={{ default_replica_count }} \
-        --set-string defaultSettings.guaranteedInstanceManagerCPU={{ guaranteed_instance_manager_cpu }} \
-        --set ingress.enabled=true \
-        --set ingress.host={{ longhorn_host }} \
-        --set ingress.ingressClassName=traefik \
-        --set ingress.tls=false \
-        --set ingress.annotations."traefik.ingress.kubernetes.io/router.entrypoints"="web" \
-        --set ingress.annotations."traefik.ingress.kubernetes.io/router.middlewares"="traefik-default-redirect@kubernetescrd"
-    fi
+    helm upgrade --install {{ longhorn_release_name }} longhorn/longhorn \
+      --namespace {{ longhorn_namespace }} \
+      --version {{ longhorn_version }} \
+      --create-namespace \
+      --set-string defaultSettings.defaultReplicaCount={{ default_replica_count }} \
+      --set-string defaultSettings.guaranteedInstanceManagerCPU={{ guaranteed_instance_manager_cpu }} \
+      --set ingress.enabled=true \
+      --set ingress.host={{ longhorn_host }} \
+      --set ingress.ingressClassName=traefik \
+      --set ingress.tls=false \
+      --set ingress.annotations."traefik.ingress.kubernetes.io/router.entrypoints"="web" \
+      --set ingress.annotations."traefik.ingress.kubernetes.io/router.middlewares"="traefik-default-redirect@kubernetescrd"
   register: longhorn_install
+  changed_when: longhorn_install.rc == 0 and 'unchanged' not in longhorn_install.stdout | default('')
   failed_when: longhorn_install.rc != 0
-  changed_when: longhorn_install.rc == 0 and (longhorn_install.stdout is defined and longhorn_install.stdout != '')
   when: psql_master | default(false)
   become: true
   environment:
@@ -102,7 +100,7 @@
   command: /usr/local/bin/k3s kubectl apply -f /tmp/longhorn-storageclass.yaml
   register: longhorn_sc_apply
   retries: 3
-  delay: 5
+  delay: 9
   until: longhorn_sc_apply.rc == 0
   become: true
   environment:
@@ -112,6 +110,19 @@
   shell: kubectl -n {{ longhorn_namespace }} get pods
   register: longhorn_pods
   failed_when: longhorn_pods.rc != 0
+  when: psql_master | default(false)
+  become: true
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+- name: Patch Longhorn settings for fast reschedule and rebuild
+  shell: |
+    set -e
+    kubectl -n {{ longhorn_namespace }} patch setting default-replica-count --type=merge -p '{"value":"{{ longhorn_default_replicas }}"}' || true
+    kubectl -n {{ longhorn_namespace }} patch setting replica-rebuild-offline --type=merge -p '{"value":"{{ longhorn_replica_rebuild_offline | ternary("true","false") }}"}' || true
+    kubectl -n {{ longhorn_namespace }} patch setting default-data-locality --type=merge -p '{"value":"{{ longhorn_data_locality }}"}' || true
+    kubectl -n {{ longhorn_namespace }} patch setting allow-volume-creation-with-degraded-availability --type=merge -p '{"value":"{{ longhorn_allow_degraded | ternary("true","false") }}"}' || true
+    kubectl -n {{ longhorn_namespace }} patch setting force-delete-terminating-pods-on-node-down --type=merge -p '{"value":"{{ longhorn_force_delete_terminating_pods_on_node_down | ternary("true","false") }}"}' || true
   when: psql_master | default(false)
   become: true
   environment:

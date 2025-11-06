@@ -1,7 +1,13 @@
 [k3s-nodes]
-k3s-ha-01 ansible_host=192.168.8.199 psql_id=1 psql_master=True private_ip=192.168.8.199
-k3s-ha-02 ansible_host=192.168.8.213 psql_id=2 psql_master=False private_ip=192.168.8.213
+k3s-ha-01 ansible_host=192.168.20.201 psql_id=1 psql_master=True private_ip=192.168.20.201
+k3s-ha-02 ansible_host=192.168.20.213 psql_id=2 psql_master=False private_ip=192.168.20.213
 
 [all:vars]
 ansible_connection=ssh
 ansible_user=user
+
+[masters:children]
+k3s-nodes
+
+[masters:vars]
+psql_master=True

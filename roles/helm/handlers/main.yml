@@ -1,3 +1,11 @@
 ---
 # Handlers for helm role (placeholder)
 # Add handlers here if needed (e.g., restart services after config changes)
+- name: restart k3s
+  systemd:
+    name: k3s
+    retries: 3
+    delay: 10
+    state: restarted
+    enabled: yes
+  become: true
