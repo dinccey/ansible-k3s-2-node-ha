@@ -1,11 +1,4 @@
 ---
-- name: Add Bitnami Helm repo
-  kubernetes.core.helm_repository:
-    name: bitnami
-    repo_url: "{{ bitnami_helm_repo }}"
-  run_once: true
-  delegate_to: "{{ groups['k3s-nodes'][0] }}"
-
 - name: Add Kite Helm repo
   kubernetes.core.helm_repository:
     name: kite
@@ -13,68 +6,19 @@
   run_once: true
   delegate_to: "{{ groups['k3s-nodes'][0] }}"
 
-- name: Render postgres values file
+- name: Render kite values file
   template:
-    src: postgres-values.yaml.j2
-    dest: /tmp/postgres-values.yaml
+    src: kite-values.yaml.j2
+    dest: /tmp/kite-values.yaml
     mode: '0644'
   become: true
   run_once: true
   delegate_to: "{{ groups['k3s-nodes'][0] }}"
 
-- name: Install or upgrade PostgreSQL for Kite
-  kubernetes.core.helm:
-    name: "{{ postgres_ha_release }}"
-    chart_ref: "{{ postgres_chart }}"
-    release_namespace: "{{ postgres_namespace }}"
-    create_namespace: true
-    values_files:
-      - /tmp/postgres-values.yaml
-    wait: true
-    timeout: 300s
-    atomic: true
-    kubeconfig: "{{ kubeconfig_path }}"
-  become: true
-  when: psql_master | default(false)
-  run_once: true
-  delegate_to: "{{ groups['k3s-nodes'][0] }}"
-
-- name: Wait for postgres primary statefulset rollout
-  command: kubectl -n {{ postgres_namespace }} rollout status statefulset/{{ postgres_ha_release }}-postgresql --timeout=300s
-  register: postgres_rollout
-  retries: 3
-  delay: 10
-  until: postgres_rollout.rc == 0
-  environment:
-    KUBECONFIG: "{{ kubeconfig_path }}"
-  become: true
-  run_once: true
-  delegate_to: "{{ groups['k3s-nodes'][0] }}"
-
-- name: Extract Kite DB password from secret
-  kubernetes.core.k8s_info:
-    api_version: v1
-    kind: Secret
-    name: "{{ postgres_ha_release }}-postgresql"
-    namespace: "{{ postgres_namespace }}"
-    kubeconfig: "{{ kubeconfig_path }}"
-  register: postgres_secret
-  become: true
-  run_once: true
-  delegate_to: "{{ groups['k3s-nodes'][0] }}"
-
-- name: Set kite_db_password fact from secret
-  set_fact:
-    kite_db_password: "{{ postgres_secret.resources[0].data.password | b64decode }}"
-
-- name: Set DSN fact for Kite
-  set_fact:
-    kite_db_dsn: "postgres://{{ postgres_username }}:{{ kite_db_password }}@{{ postgres_ha_release }}-postgresql.{{ postgres_namespace }}.svc.cluster.local:5432/{{ postgres_database }}"
-
-- name: Render kite values file
+- name: Render kite PVC manifest
   template:
-    src: kite-values.yaml.j2
-    dest: /tmp/kite-values.yaml
+    src: kite-pvc.yaml.j2
+    dest: /tmp/kite-pvc.yaml
     mode: '0644'
   become: true
   run_once: true
@@ -93,25 +37,11 @@
   run_once: true
   delegate_to: "{{ groups['k3s-nodes'][0] }}"
 
-- name: Ensure Kite secret exists with DB config
+- name: Apply kite PVC
   kubernetes.core.k8s:
-    state: present
-    definition:
-      apiVersion: v1
-      kind: Secret
-      metadata:
-        name: "{{ kite_release_name }}-secret"
-        namespace: "{{ kite_namespace }}"
-        labels:
-          app.kubernetes.io/managed-by: Helm
-        annotations:
-          meta.helm.sh/release-name: "{{ kite_release_name }}"
-          meta.helm.sh/release-namespace: "{{ kite_namespace }}"
-      type: Opaque
-      data:
-        DB_TYPE: "{{ 'postgres' | b64encode }}"
-        DB_DSN: "{{ kite_db_dsn | b64encode }}"
+    src: /tmp/kite-pvc.yaml
     kubeconfig: "{{ kubeconfig_path }}"
+    state: present
   become: true
   run_once: true
   delegate_to: "{{ groups['k3s-nodes'][0] }}"
@@ -127,6 +57,128 @@
     timeout: 900s
     atomic: true
     kubeconfig: "{{ kubeconfig_path }}"
+  become: true
+  run_once: true
+  delegate_to: "{{ groups['k3s-nodes'][0] }}"
+
+- name: Wait for kite deployment rollout
+  command: kubectl -n {{ kite_namespace }} rollout status deployment/{{ kite_release_name }} --timeout=300s
+  register: kite_rollout
+  retries: 6
+  delay: 10
+  until: kite_rollout.rc == 0
+  environment:
+    KUBECONFIG: "{{ kubeconfig_path }}"
+  become: true
+  run_once: true
+  delegate_to: "{{ groups['k3s-nodes'][0] }}"
+
+- name: Patch Kite Deployment to use PVC and add anti-affinity
+  kubernetes.core.k8s_json_patch:
+    api_version: apps/v1
+    kind: Deployment
+    name: "{{ kite_release_name }}"
+    namespace: "{{ kite_namespace }}"
+    patch:
+      - op: remove
+        path: /spec/template/spec/volumes/0/emptyDir
+      - op: add
+        path: /spec/template/spec/volumes/0/persistentVolumeClaim
+        value:
+          claimName: "{{ kite_release_name }}-data"
+      - op: add
+        path: /spec/template/spec/affinity
+        value:
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 100
+                podAffinityTerm:
+                  labelSelector:
+                    matchExpressions:
+                      - key: app.kubernetes.io/name
+                        operator: In
+                        values:
+                          - kite
+                  topologyKey: kubernetes.io/hostname
+    kubeconfig: "{{ kubeconfig_path }}"
+  become: true
+  run_once: true
+  delegate_to: "{{ groups['k3s-nodes'][0] }}"
+
+- name: Wait for kite deployment rollout after patch
+  command: kubectl -n {{ kite_namespace }} rollout status deployment/{{ kite_release_name }} --timeout=300s
+  register: kite_rollout_patch
+  retries: 6
+  delay: 10
+  until: kite_rollout_patch.rc == 0
+  environment:
+    KUBECONFIG: "{{ kubeconfig_path }}"
+  become: true
+  run_once: true
+  delegate_to: "{{ groups['k3s-nodes'][0] }}"
+
+- name: Apply PodDisruptionBudget for Kite
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: policy/v1
+      kind: PodDisruptionBudget
+      metadata:
+        name: kite-pdb
+        namespace: "{{ kite_namespace }}"
+      spec:
+        minAvailable: 1
+        selector:
+          matchLabels:
+            app.kubernetes.io/name: kite
+    kubeconfig: "{{ kubeconfig_path }}"
+  become: true
+  run_once: true
+  delegate_to: "{{ groups['k3s-nodes'][0] }}"
+
+- name: Verify Kite PVC is bound
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: PersistentVolumeClaim
+    name: "{{ kite_release_name }}-data"
+    namespace: "{{ kite_namespace }}"
+    kubeconfig: "{{ kubeconfig_path }}"
+  register: pvc_status
+  become: true
+  run_once: true
+  delegate_to: "{{ groups['k3s-nodes'][0] }}"
+
+- name: Fail if PVC not bound
+  fail:
+    msg: "PVC {{ kite_release_name }}-data is not bound. Status: {{ pvc_status.resources[0].status.phase if pvc_status.resources | length > 0 else 'Not found' }}"
+  when: pvc_status.resources | length == 0 or (pvc_status.resources[0].status.phase is defined and pvc_status.resources[0].status.phase != "Bound")
+  become: true
+  run_once: true
+  delegate_to: "{{ groups['k3s-nodes'][0] }}"
+
+- name: Get Kite pods
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Pod
+    namespace: "{{ kite_namespace }}"
+    label_selectors:
+      - "app.kubernetes.io/instance={{ kite_release_name }}"
+    kubeconfig: "{{ kubeconfig_path }}"
+  register: kite_pods_info
+  become: true
+  run_once: true
+  delegate_to: "{{ groups['k3s-nodes'][0] }}"
+
+- name: Verify PVC mount in each Kite pod
+  assert:
+    that:
+      - item.spec.volumes is defined
+      - item.spec.volumes | selectattr('persistentVolumeClaim', 'defined') | map(attribute='persistentVolumeClaim.claimName') | select('equalto', kite_release_name ~ '-data') | list | length > 0
+    fail_msg: "PVC {{ kite_release_name }}-data not mounted in pod {{ item.metadata.name }}. Volumes: {{ item.spec.volumes | default([]) }}"
+    success_msg: "PVC {{ kite_release_name }}-data is mounted in pod {{ item.metadata.name }}"
+  loop: "{{ kite_pods_info.resources }}"
+  loop_control:
+    label: "{{ item.metadata.name }}"
   become: true
   run_once: true
   delegate_to: "{{ groups['k3s-nodes'][0] }}"
@@ -148,46 +200,3 @@
   become: true
   run_once: true
   delegate_to: "{{ groups['k3s-nodes'][0] }}"
-
-- name: Debug- check deployed DB_TYPE in Kite deployment
-  command: kubectl -n {{ kite_namespace }} get deploy {{ kite_release_name }} -o jsonpath="{.spec.template.spec.containers[0].env[?(@.name=='DB_TYPE')].value}"
-  register: kite_deployed_db_type
-  failed_when: false
-  environment:
-    KUBECONFIG: "{{ kubeconfig_path }}"
-  become: true
-  run_once: true
-  delegate_to: "{{ groups['k3s-nodes'][0] }}"
-
-- name: If deployment still uses sqlite, dump kite-secret and fail with guidance
-  when: kite_deployed_db_type.stdout == 'sqlite'
-  block:
-    - name: Get kite secret DB_TYPE
-      command: kubectl -n {{ kite_namespace }} get secret {{ kite_release_name }}-secret -o jsonpath="{.data.DB_TYPE}" | base64 -d
-      register: kite_secret_db_type
-      failed_when: false
-      environment:
-        KUBECONFIG: "{{ kubeconfig_path }}"
-      become: true
-      run_once: true
-      delegate_to: "{{ groups['k3s-nodes'][0] }}"
-
-    - name: Get kite secret DB_DSN
-      command: kubectl -n {{ kite_namespace }} get secret {{ kite_release_name }}-secret -o jsonpath="{.data.DB_DSN}" | base64 -d
-      register: kite_secret_db_dsn
-      failed_when: false
-      environment:
-        KUBECONFIG: "{{ kubeconfig_path }}"
-      become: true
-      run_once: true
-      delegate_to: "{{ groups['k3s-nodes'][0] }}"
-
-    - name: Fail and show diagnostics
-      fail:
-        msg: |
-          Kite deployment still shows DB_TYPE={{ kite_deployed_db_type.stdout | default('<none>') }}.
-          kite-secret contains DB_TYPE={{ kite_secret_db_type.stdout | default('<none>') }} and DB_DSN={{ kite_secret_db_dsn.stdout | default('<none>') }}.
-          Possible causes:
-            - Chart sets DB env vars from values that we didn't override. Run `helm show values {{ kite_chart }}` and check the DB keys.
-            - Chart templates hardcode sqlite in the Deployment; you'll need to set the chart's DB config keys explicitly.
-          I can (A) run `helm show values` and try to auto-detect the correct key, or (B) convert secret/values handling to use the `k8s` module for stronger guarantees.

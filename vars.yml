@@ -1,5 +1,5 @@
 # K3S
-k3s_version: v1.33.5+k3s1
+k3s_version: v1.34.1+k3s1
 k3s_psql_db: postgres
 k3s_psql_user: k3s
 k3s_psql_password: Tn6D2HFvf8RxDvG6
@@ -21,6 +21,7 @@ kite_db_password: "suKiSge2BS2V4KRr"
 # Longhorn
 longhorn_host: "longhorn.k3s.zg"
 
+
 # Experimental
 pg_synchronous_commit: remote_write     # on | remote_write | remote_apply
 pg_synchronous_standby_names: "node2"   # or "ANY 1 (node2)" with quorum syntax
@@ -28,8 +29,8 @@ pg_sync_standby_name: "node2"           # used in primary_conninfo application_n
 
 # FAST FAILOVER & LONGHORN / K3S TUNING
 # K3s etcd tuning (ms)
-k3s_etcd_heartbeat_interval: 100      # ms (default 500) → detect failure faster
-k3s_etcd_election_timeout: 1000       # ms (default 5000)
+k3s_etcd_heartbeat_interval: 500      # ms (default 500) → detect failure faster
+k3s_etcd_election_timeout: 5000       # ms (default 5000)
 
 
 # Longhorn settings (preferred to be editable here)

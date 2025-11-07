@@ -6,3 +6,7 @@ longhorn_chart_repo: https://charts.longhorn.io
 longhorn_release_name: longhorn
 default_replica_count: 2
 guaranteed_instance_manager_cpu: 10
+longhorn_data_locality: "best-effort"
+longhorn_replica_rebuild_offline: true
+longhorn_allow_degraded: true
+longhorn_pod_deletion_policy: "delete-both-statefulset-and-deployment-pod"

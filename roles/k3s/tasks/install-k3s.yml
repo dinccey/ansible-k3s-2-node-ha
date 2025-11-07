@@ -137,6 +137,50 @@
     dest: /usr/local/bin/crictl
     state: link
 
+- name: Render pod-finalizer-cleaner CronJob manifest
+  template:
+    src: pod-finalizer-cleaner-cronjob.yaml.j2
+    dest: /tmp/pod-finalizer-cleaner-cronjob.yaml
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  run_once: true
+  delegate_to: "{{ groups['k3s-nodes'][0] }}"
+
+- name: Apply pod-finalizer-cleaner CronJob
+  command: /usr/local/bin/k3s kubectl apply -f /tmp/pod-finalizer-cleaner-cronjob.yaml
+  register: cronjob_apply
+  retries: 5
+  delay: 6
+  until: cronjob_apply.rc == 0
+  become: true
+  run_once: true
+  delegate_to: "{{ groups['k3s-nodes'][0] }}"
+
+
+- name: Render pod-finalizer-cleaner RBAC manifest
+  template:
+    src: pod-finalizer-cleaner-rbac.yaml.j2
+    dest: /tmp/pod-finalizer-cleaner-rbac.yaml
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  run_once: true
+  delegate_to: "{{ groups['k3s-nodes'][0] }}"
+
+- name: Apply pod-finalizer-cleaner RBAC
+  command: /usr/local/bin/k3s kubectl apply -f /tmp/pod-finalizer-cleaner-rbac.yaml
+  register: cronjob_rbac_apply
+  retries: 5
+  delay: 6
+  until: cronjob_rbac_apply.rc == 0
+  become: true
+  run_once: true
+  delegate_to: "{{ groups['k3s-nodes'][0] }}"
+
+
 - name: Deploy Traefik DaemonSet manifest (optional)
   when: install_traefik_daemonset | default(false)
   block:

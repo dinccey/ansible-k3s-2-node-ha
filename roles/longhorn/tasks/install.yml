@@ -118,12 +118,16 @@
 - name: Patch Longhorn settings for fast reschedule and rebuild
   shell: |
     set -e
-    kubectl -n {{ longhorn_namespace }} patch setting default-replica-count --type=merge -p '{"value":"{{ longhorn_default_replicas }}"}' || true
-    kubectl -n {{ longhorn_namespace }} patch setting replica-rebuild-offline --type=merge -p '{"value":"{{ longhorn_replica_rebuild_offline | ternary("true","false") }}"}' || true
+    kubectl -n {{ longhorn_namespace }} patch setting default-replica-count --type=merge -p '{"value":"{{ default_replica_count }}"}' || true
+    kubectl -n {{ longhorn_namespace }} patch setting offline-replica-rebuilding --type=merge -p '{"value":"{{ longhorn_replica_rebuild_offline | ternary("true","false") }}"}' || true
     kubectl -n {{ longhorn_namespace }} patch setting default-data-locality --type=merge -p '{"value":"{{ longhorn_data_locality }}"}' || true
     kubectl -n {{ longhorn_namespace }} patch setting allow-volume-creation-with-degraded-availability --type=merge -p '{"value":"{{ longhorn_allow_degraded | ternary("true","false") }}"}' || true
-    kubectl -n {{ longhorn_namespace }} patch setting force-delete-terminating-pods-on-node-down --type=merge -p '{"value":"{{ longhorn_force_delete_terminating_pods_on_node_down | ternary("true","false") }}"}' || true
+    kubectl -n {{ longhorn_namespace }} patch setting pod-deletion-policy-when-node-is-down --type=merge -p '{"value":"{{ longhorn_pod_deletion_policy }}"}' || true
   when: psql_master | default(false)
   become: true
   environment:
     KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+
+# verify:
+# kubectl get settings.longhorn.io -n longhorn-system -o yaml | grep -E 'default-replica-count|offline-replica-rebuilding|default-data-locality|allow-volume-creation-with-degraded-availability|pod-deletion-policy-when-node-is-down'

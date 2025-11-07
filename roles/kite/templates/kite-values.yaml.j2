@@ -2,8 +2,7 @@ replicaCount: {{ kite_replica_count }}
 
 # Database configuration
 db:
-    type: postgres
-    dsn: "{{ kite_db_dsn }}"
+    type: sqlite
 
 # Also reference the secret as an envFrom source; the role ensures this secret
 # exists ({{ kite_release_name }}-secret) so charts that prefer secrets will pick it up.

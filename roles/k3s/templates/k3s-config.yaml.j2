@@ -1,6 +1,14 @@
-# Fast failover tuning
+# Fast failover tuning (taint-based eviction)
 etcd-heartbeat-interval: {{ k3s_etcd_heartbeat_interval }}
 etcd-election-timeout: {{ k3s_etcd_election_timeout }}
+
+# Speed up node condition detection
 kube-controller-manager-arg:
-  - "node-monitor-grace-period=10s"
-  - "node-monitor-period=2s"
+  - "node-monitor-grace-period=15s"
+  - "node-monitor-period=5s"
+  # REMOVED: "pod-eviction-timeout=15s"
+
+# Control taint-based eviction timing
+kube-apiserver-arg:
+  - "default-not-ready-toleration-seconds=15"
+  - "default-unreachable-toleration-seconds=15"
