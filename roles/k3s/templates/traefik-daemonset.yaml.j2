@@ -94,8 +94,14 @@ spec:
             - "--entryPoints.web.address=:80"
             - "--entryPoints.websecure.address=:443"
             - "--providers.kubernetesingress"
+            #- "--providers.kubernetesingresscrd"  # Enable CRD support for IngressRoute
             - "--providers.kubernetesingress.ingressclass=traefik"  # Matches your IngressClass
             - "--providers.kubernetesingress.namespaces="  # Watch all namespaces
+            - "--providers.kubernetesingress.allowexternalnameservices=true"  # Enables ExternalName services (fixes 404 for your backends)
+            - "--providers.kubernetesingress.allowemptyservices=true"  # Allows routing to empty services (helps during startup)
+            - "--log.level=DEBUG"  # Set log level to DEBUG for detailed logs
+            # view logs with:
+            # kubectl logs -n traefik -l app=traefik --tail=50
           ports:
             - containerPort: 80
               hostPort: 80
